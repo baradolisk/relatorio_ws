@@ -741,6 +741,36 @@ function Get-CompartilhamentosServidor {
 }
 
 
+# O Windows registra ShareName como \\*\Share, sem o nome real do servidor.
+function ConvertTo-ShareServidor {
+    param ([string]$Share, [string]$Servidor)
+    if ($Share.StartsWith('\\*\') -and $Servidor) {
+        return '\\' + $Servidor + $Share.Substring(3)
+    }
+    return $Share
+}
+
+function Test-FiltroRede {
+    param ([string]$Filtro, [string]$Share, [string]$Relativo,
+           [string]$ServidorEvento, [string]$ServidorConsulta)
+    if ($Filtro -notmatch '^\\\\([^\\]+)\\(.+)$') { return $false }
+    $hostFiltro = $Matches[1]
+    $restante = $Matches[2].TrimEnd('\')
+    $servidorValido = $false
+    foreach ($nome in @($ServidorEvento, $ServidorConsulta)) {
+        if (-not $nome) { continue }
+        if ($hostFiltro -ieq $nome -or
+            (($hostFiltro -notlike '*.*' -or $nome -notlike '*.*') -and
+             ($hostFiltro.Split('.')[0] -ieq $nome.Split('.')[0]))) {
+            $servidorValido = $true
+        }
+    }
+    if (-not $servidorValido -or $Share -notmatch '^\\\\[^\\]+\\(.+)$') { return $false }
+    $alvo = $Matches[1].TrimEnd('\')
+    if ($Relativo) { $alvo += '\' + $Relativo.TrimStart('\') }
+    return ($alvo -ieq $restante -or $alvo.StartsWith($restante + '\', [StringComparison]::OrdinalIgnoreCase))
+}
+
 # Converte um evento do log em um registro de acesso.
 # Retorna $null quando o evento é filtrado ou não pôde ser processado.
 function Convert-EventoAcesso {
@@ -795,7 +825,7 @@ function Convert-EventoAcesso {
             # Evento 5145 - acesso detalhado via compartilhamento SMB
             5145 {
 
-                $shareName = [string]$dado['ShareName']
+                $shareName = ConvertTo-ShareServidor ([string]$dado['ShareName']) ([string]$Evento.MachineName)
                 $relativeTarget = [string]$dado['RelativeTargetName']
                 $compartilhamento = $shareName
                 $caminhoRelativo = $relativeTarget
@@ -825,7 +855,7 @@ function Convert-EventoAcesso {
             # Evento 5140 - conexão ao compartilhamento
             5140 {
 
-                $objeto = [string]$dado['ShareName']
+                $objeto = ConvertTo-ShareServidor ([string]$dado['ShareName']) ([string]$Evento.MachineName)
                 $compartilhamento = $objeto
                 $caminhoLocal = ([string]$dado['ShareLocalPath'] -replace '^\\\?\?\\', '').TrimEnd('\')
                 $ip = ConvertTo-IpNormalizado ([string]$dado['IpAddress'])
@@ -901,7 +931,16 @@ function Convert-EventoAcesso {
             -not [string]::IsNullOrWhiteSpace($caminhoLocal) -and
             $caminhoLocal -like $padraoPasta
 
-        if (-not $correspondeObjeto -and -not $correspondeLocal) {
+        # UNC considera servidor curto/FQDN e o servidor consultado (alias explícito).
+        $correspondeRede = Test-FiltroRede -Filtro $Pasta -Share $compartilhamento `
+            -Relativo $caminhoRelativo -ServidorEvento $Evento.MachineName -ServidorConsulta $servidor
+        # 4663 contém apenas ObjectName local: a tradução depende do inventário SMB.
+        $correspondeTraducao = $false
+        if ($EventoId -eq 4663 -and $pastaLocalTraduzida) {
+            $correspondeTraducao = $caminhoLocal -ieq $pastaLocalTraduzida -or
+                $caminhoLocal.StartsWith($pastaLocalTraduzida + '\', [StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not $correspondeObjeto -and -not $correspondeLocal -and -not $correspondeRede -and -not $correspondeTraducao) {
             return $null
         }
 
@@ -1253,6 +1292,21 @@ $registros = New-Object 'System.Collections.Generic.List[object]'
 $indiceGrupos = @{}
 
 foreach ($servidor in $Computador) {
+    $pastaLocalTraduzida = ''
+    if ($EventoId -eq 4663 -and $Pasta -match '^\\\\([^\\]+)\\([^\\]+)(.*)$') {
+        $hostFiltro = $Matches[1]; $nomeShare = $Matches[2]; $subcaminho = $Matches[3]
+        if ($hostFiltro -ieq $servidor -or
+            (($hostFiltro -notlike '*.*' -or $servidor -notlike '*.*') -and
+             ($hostFiltro.Split('.')[0] -ieq $servidor.Split('.')[0]))) {
+            $shareFiltro = @(Get-CompartilhamentosServidor -Servidor $servidor | Where-Object { $_.Name -ieq $nomeShare })
+            if ($shareFiltro.Count -eq 1 -and $shareFiltro[0].Path) {
+                $pastaLocalTraduzida = ([string]$shareFiltro[0].Path).TrimEnd('\') + $subcaminho.TrimEnd('\')
+            } else {
+                Write-Warning "Não foi possível traduzir '$Pasta' para o caminho local no servidor '$servidor'. Para 4663 use o caminho absoluto, por exemplo E:\FileServer, ou confira o inventário SMB."
+            }
+        }
+    }
+
 
     Write-Host "Consultando log de Segurança em $servidor..." -ForegroundColor Cyan
 

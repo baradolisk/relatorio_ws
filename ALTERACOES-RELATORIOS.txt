@@ -5,7 +5,9 @@ ARQUIVOS ENTREGUES
 - Relatorio-PermissoesPasta-v2.ps1: nova versão do inventário de permissões.
 - ListaAutorizados-exemplo.csv: modelo de regras com caminhos completos.
 - ALTERACOES-RELATORIOS.txt: este documento.
-Os dois scripts originais foram preservados, sem alterações.
+Na entrega inicial, os dois scripts originais foram preservados.
+Na correção UNC descrita ao final, Relatorio-AcessoPasta.ps1 foi alterado
+conforme solicitado; Relatorio-PermissoesPasta.ps1 permanece inalterado.
 
 OBJETIVO
 Investigar atividade registrada nos servidores de arquivos e identificar
@@ -145,3 +147,25 @@ LIMITES E PRÓXIMOS PASSOS OPERACIONAIS
 - Validar primeiro em servidor de teste, com janela curta e casos controlados:
   usuário permitido, usuário fora da regra, tentativa bloqueada, grupo indisponível
   e pasta não legível. Conferir CSV detalhado e cobertura juntos.
+
+CORREÇÃO ADICIONAL — CAMINHOS DE REDE NO SCRIPT ORIGINAL
+Arquivo alterado: Relatorio-AcessoPasta.ps1.
+- Corrigido ShareName \\*\Share dos eventos 5145 e 5140, substituindo o
+  curinga pelo nome do servidor registrado no evento.
+- Filtro UNC reconhece nome curto/FQDN, preserva limites de diretório e
+  considera o nome explicitamente usado em -Computador para aliases.
+- No 4663, filtro UNC é traduzido para caminho local por Get-SmbShare no
+  servidor consultado; falha de tradução produz aviso. São necessárias as
+  permissões e conectividade de inventário SMB/CIM.
+- O caminho E:\FileServer pode ser usado para abranger eventos com caminho
+  local nessa raiz. Nenhum nome de compartilhamento é presumido ou fixado.
+- Sintaxe e ajuda aprovadas no PowerShell 7.4.13; 11 verificações simuladas
+  passaram, incluindo eventos 5145/5140/4663, UNC, caminho absoluto, nome
+  curto/FQDN, alias explícito e rejeição de servidor/share diferentes.
+- Windows Server e PowerShell 5.1 ainda precisam de validação real.
+- Esta correção não habilita auditoria nem recupera eventos ausentes.
+
+Exemplos (ajustar SERVER e Administracao ao servidor/share reais):
+.\Relatorio-AcessoPasta.ps1 -Computador SERVER -Pasta "\\SERVER\Administracao" -Dias 1 -EventoId 5145
+.\Relatorio-AcessoPasta.ps1 -Computador SERVER -Pasta "E:\FileServer" -Dias 1 -EventoId 5145
+Para conferir os nomes reais, executar no servidor: Get-SmbShare | Select-Object Name,Path
