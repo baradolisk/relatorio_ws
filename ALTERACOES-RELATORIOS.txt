@@ -1,0 +1,147 @@
+RELATÓRIO DE ALTERAÇÕES — REVISÃO DOS SCRIPTS
+
+ARQUIVOS ENTREGUES
+- Relatorio-AcessoPasta-v8.ps1: nova versão do relatório de acessos.
+- Relatorio-PermissoesPasta-v2.ps1: nova versão do inventário de permissões.
+- ListaAutorizados-exemplo.csv: modelo de regras com caminhos completos.
+- ALTERACOES-RELATORIOS.txt: este documento.
+Os dois scripts originais foram preservados, sem alterações.
+
+OBJETIVO
+Investigar atividade registrada nos servidores de arquivos e identificar
+possíveis divergências em relação às regras de negócio aprovadas pela empresa.
+Uma regra técnica ampla não prova, isoladamente, acesso indevido.
+
+1. IDENTIDADE E AUTORIZAÇÃO
+- Comparação por SID do usuário, em vez do nome sem domínio.
+- Nomes iguais em domínios diferentes não compartilham autorização.
+- SID ausente ou inválido resulta em Indeterminado quando existe regra aplicável.
+- Autorizado exige associação confirmada a pelo menos um grupo permitido.
+- NAO AUTORIZADO exige consultas completas de todos os grupos aplicáveis.
+- Se uma consulta falhar e nenhum grupo confirmar a associação, o resultado
+  será Indeterminado. Membros parciais não são publicados como grupo completo.
+- Consulta dos grupos aninhados com controle de ciclos e inclusão de usuários
+  associados pelo grupo primário, inclusive em grupos aninhados.
+- Membro estrangeiro não resolvido torna a consulta do grupo indeterminada.
+- Novo -ServidorAD para selecionar explicitamente o servidor/domínio inicial.
+  Grupos de outros domínios são consultados em seu domínio de origem.
+- Departamento e cargo são consultados por SID. Falhas deixam campos vazios.
+- Grupos refletem o momento da coleta, não a associação histórica na data do evento.
+
+2. REGRAS DE CAMINHO
+- O CSV exige caminho completo UNC ou local: Pasta;Grupo.
+- A regra vale para a pasta exata e seus descendentes, sem diferenciar caixa.
+- Financeiro não corresponde mais a FinanceiroBackup.
+- Curingas e segmentos relativos (ponto e ponto-ponto) são rejeitados.
+- Linhas com Pasta ou Grupo vazios causam erro em vez de serem ignoradas.
+- A regra de maior caminho continua prevalecendo; grupos com a mesma regra
+  são alternativas de autorização, não requisitos cumulativos.
+- O filtro de pesquisa -Pasta continua aceitando trechos; essa opção não é
+  uma regra de autorização.
+- ShareName registrado como \\*\Nome é normalizado com o servidor do evento.
+  Nas regras UNC, use o nome que aparece no CSV (frequentemente FQDN).
+  Apelidos DNS, DFS e caminhos locais não são automaticamente equivalentes.
+- Uma regra local como D:\Dados vale para esse caminho em qualquer servidor
+  consultado. Prefira UNC para regras específicas de um servidor nos eventos SMB.
+
+3. INTERPRETAÇÃO DOS EVENTOS
+- Removida a mensagem que tratava êxito no 5145 como prova de leitura.
+- Nova coluna NaturezaEvento ao final do CSV detalhado:
+  5145: verificação de acesso SMB; não comprova leitura de conteúdo.
+  4663: uso de direito auditado no objeto; analisar AccessMask e SACL.
+  5140: conexão ao compartilhamento; sem detalhe de cada arquivo.
+- ConcedidoPor continua compatível, mas representa ACE identificada no
+  AccessReason; não identifica a pessoa que configurou a permissão.
+- A classificação de autorização representa a regra de negócio, não substitui
+  cálculo de acesso efetivo do Windows nem comprovação de leitura do conteúdo.
+
+4. COBERTURA DO RELATÓRIO DE ACESSOS
+- Novo -CsvCobertura. Com -CsvSaida, gera automaticamente
+  <caminho-do-CSV>.cobertura.csv, salvo caminho de cobertura explícito.
+- Cobertura é exportada mesmo quando não existem eventos correspondentes.
+- Registra estado por servidor, início e fim, falhas de leitura, verificação
+  do log, retenção insuficiente, falhas de inventário e conversão, contagens
+  de descartes e principais filtros aplicados.
+- O limite final do período agora é fixado antes da coleta e aplicado a todos
+  os servidores, inclusive com -Dias ou -Inicio sem -Fim.
+- O primeiro evento mais recente que o início é tratado como cobertura não
+  confirmada; não se afirma automaticamente que houve sobrescrita.
+- Falhas de conversão, inventário e retenção limitam o estado da consulta.
+- A cobertura não confirma auditoria/SACL em todas as pastas. Ausência de
+  eventos continua diferente de ausência de acessos.
+
+5. RESUMOS, AGRUPAMENTO E EVIDÊNCIA
+- PastaResumo usa a raiz do compartilhamento ou da unidade local. Não tenta
+  distinguir arquivo de pasta pela presença de ponto no nome.
+- O CSV de resumo separa servidor e SID, além do nome e pasta, e preserva
+  Indeterminado quando não há registro NAO AUTORIZADO no conjunto.
+- A chave de agrupamento agora inclui SID, AccessReason, processo e handle,
+  com codificação JSON para evitar colisões de delimitadores.
+- Sem -Agrupar, cada evento continua sendo preservado individualmente.
+  Para investigação, prefira o CSV detalhado sem agrupamento e gere o resumo
+  separadamente na mesma execução por meio de -CsvResumo.
+- As 22 primeiras colunas do CSV detalhado foram mantidas; NaturezaEvento
+  foi acrescentada ao final. Alguns valores de caminho mudam pela normalização.
+- {data} usa um único carimbo por execução para os arquivos relacionados.
+
+6. INVENTÁRIO DE PERMISSÕES V2
+- Corrigida conversão da lista genérica com ToArray(), evitando a falha
+  Argument types do not match reproduzida no PowerShell 7.4.
+- ACE de negação não é mais apresentada como concessão em PodeAlterar.
+- Falhas ao ler ACL agora geram aviso visível e registro de cobertura.
+- Erros de enumeração, compartilhamento, servidor e resolução de SID também
+  são registrados. A cobertura inclui uma linha de conclusão e profundidade.
+- Novo -CsvCobertura; com -CsvSaida, cobertura automática como no v8.
+- Não calcula permissão efetiva combinando compartilhamento, NTFS, grupos
+  e negações. É um inventário de ACEs.
+- Profundidade continua limitada por -Profundidade (padrão 1, máximo 10).
+  Arquivos com ACL própria não são inventariados individualmente.
+
+EXEMPLOS — EXECUTAR NO WINDOWS SERVER
+Substitua servidores e grupos pelos reais. Não é necessário editar os scripts.
+Edite uma cópia do CSV de exemplo com as regras aprovadas pela empresa.
+
+Coleta inicial, todos os usuários humanos e compartilhamentos inclusive
+administrativos, sem filtro de pasta e sem agrupamento:
+
+.\Relatorio-AcessoPasta-v8.ps1 -Computador "SRV-ARQ1","SRV-ARQ2" -Dias 1 -EventoId 5145 -IncluirCompartilhamentosEspeciais -CsvSaida "C:\Relatorios\acessos-{data}.csv" -CsvResumo "C:\Relatorios\resumo-{data}.csv" -Silencioso
+
+Acrescente, após ajustar a política de negócio:
+-ListaAutorizados "C:\Relatorios\autorizados.csv" -ServidorAD "dc1.empresa.local"
+
+Para incluir também contas terminadas em $, acrescente -IncluirContasComputador.
+Não use -ExcluirUsuarios nem -IgnorarAtributos na primeira coleta abrangente.
+
+Inventário de permissões dos compartilhamentos não administrativos:
+
+.\Relatorio-PermissoesPasta-v2.ps1 -Computador "SRV-ARQ1","SRV-ARQ2" -Profundidade 2 -CsvSaida "C:\Relatorios\permissoes-{data}.csv"
+
+VALIDAÇÃO EXECUTADA
+- PowerShell 7.4.13 em Linux: sintaxe e leitura de ajuda dos novos scripts.
+- 23 verificações com funções e fontes simuladas passaram, cobrindo:
+  SID e domínios distintos; grupo indisponível; SID ausente; regra exata e
+  descendente; prioridade; rejeição de caminhos inválidos; resumo sem heurística;
+  processamento completo de evento 5145; normalização de servidor e IP;
+  janela final fixa; CSV detalhado; cobertura de dois servidores com falha RPC;
+  grupo primário em grupo aninhado; ausência de eventos; exportação de
+  permissões; ACE de negação e falha de ACL.
+- Testes simulados não acessaram nem alteraram servidores, AD ou ACLs reais.
+- Windows PowerShell 5.1 e Windows Server com logs reais NÃO foram testados.
+  Os arquivos usam UTF-8 com BOM e declaram PowerShell mínimo 5.1.
+
+LIMITES E PRÓXIMOS PASSOS OPERACIONAIS
+- Informar explicitamente todos os servidores de arquivos em -Computador.
+  Não há descoberta automática do domínio, DFS ou clusters.
+- Os dois scripts apenas consultam; não habilitam auditoria, alteram ACLs,
+  adicionam usuários a grupos ou modificam políticas do domínio.
+- Habilitar as políticas de auditoria necessárias e SACL para 4663 no Windows.
+- Garantir acesso aos logs, compartilhamentos, AD e portas/protocolos usados.
+- Para acesso direto local no servidor, complementar a coleta 5145 com 4663.
+  A correlação automática entre eventos não foi implementada.
+- O script de acessos ainda mantém os registros em memória: dividir períodos
+  e servidores em ambientes grandes. Não foi implementada exportação em lotes.
+- Agendamento, checkpoints e Windows Event Forwarding exigem configuração
+  operacional separada; eventos já perdidos não podem ser recuperados pelo script.
+- Validar primeiro em servidor de teste, com janela curta e casos controlados:
+  usuário permitido, usuário fora da regra, tentativa bloqueada, grupo indisponível
+  e pasta não legível. Conferir CSV detalhado e cobertura juntos.

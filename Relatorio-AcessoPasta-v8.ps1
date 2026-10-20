@@ -1,0 +1,2043 @@
+﻿#requires -Version 5.1
+<#
+.SYNOPSIS
+    Gera relatório de acessos a pastas/arquivos compartilhados
+    a partir do log de Segurança do Windows Server.
+
+.DESCRIPTION
+    Versão revisada v8. Use -CsvCobertura para cobertura por servidor;
+    com -CsvSaida, o arquivo de cobertura é criado automaticamente.
+    -ServidorAD seleciona o controlador/domínio para consultas AD.
+    Regras Pasta;Grupo exigem caminho completo UNC ou local (sem curingas).
+    Sem -Computador, consulta apenas o computador local; informe todos os
+    servidores de arquivos. Não há descoberta automática do domínio.
+    Membros AD refletem a coleta atual, não a data histórica do evento.
+    Resumos usam a raiz do compartilhamento, sem deduzir tipo pelo nome.
+
+    Consulta eventos de auditoria do Windows (em um ou vários servidores)
+    e exibe informações como:
+
+      - Data e hora
+      - Servidor de origem
+      - Usuário (domínio\usuário)
+      - Resultado (Êxito/Falha)
+      - IP e porta de origem
+      - Arquivo/pasta acessado (caminho de rede e caminho local)
+      - Tipo de acesso, AccessList e AccessMask original
+      - Logon ID
+      - Processo, ProcessId e HandleId relacionados (4663)
+      - ID e RecordId do evento
+      - Quem liberou o acesso (AccessReason do 5145, com SIDs resolvidos) e
+        se a liberação veio de um grupo amplo (Everyone, Domain Users...)
+      - Estação (DNS), departamento/cargo (AD) e status de autorização
+        (comparação com uma lista de autorizados), quando solicitados
+
+    Eventos suportados:
+
+      4663 - Acesso efetivo a arquivo/pasta.
+             Exige auditoria configurada na pasta/arquivo via SACL.
+             Não traz IP (use o LogonId para cruzar com 5145/5140).
+
+      5145 - Verificação detalhada de acesso através de compartilhamento SMB.
+             Recomendado para identificar: usuário + IP + arquivo/pasta.
+
+      5140 - Conexão a um compartilhamento de rede.
+             Não identifica necessariamente cada arquivo acessado.
+
+    Execute como Administrador no servidor de arquivos.
+
+.PARAMETER Pasta
+    Trecho do caminho, pasta, arquivo ou compartilhamento a filtrar.
+    OPCIONAL: se omitido, o relatório cobre todos os compartilhamentos
+    (exceto IPC$, ADMIN$ e unidades administrativas como C$, salvo se usar
+    -IncluirCompartilhamentosEspeciais).
+    Caracteres especiais como [ ] são tratados literalmente.
+
+    O filtro é comparado com o caminho de rede (\\...\Share\sub\arquivo) e
+    com o caminho local completo (D:\Dados\Financeiro\sub\arquivo), então
+    ambos funcionam. O nome do processo (4663) NÃO entra no filtro.
+
+    Exemplos:
+        Financeiro
+        Financeiro\Pagamentos
+        D:\Dados\Financeiro\Pagamentos
+        relatorio.xlsx
+        "Projeto [2026]"
+
+.PARAMETER Dias
+    Quantos dias para trás consultar. Padrão: 1
+    (Não pode ser usado junto com -Inicio/-Fim.)
+
+.PARAMETER Inicio
+    Início do período a consultar (ex.: "2026-10-19 08:00").
+    Use no lugar de -Dias para investigar uma janela específica.
+
+.PARAMETER Fim
+    Fim do período (usado com -Inicio). Se omitido, vai até agora.
+
+.PARAMETER EventoId
+    Evento de segurança a consultar: 4663, 5145 ou 5140. Padrão: 5145
+
+.PARAMETER Usuario
+    Filtro opcional por usuário. Aceita curingas (joao, joao*, *silva*).
+    Se o filtro contiver "\" (ex.: "EMPRESA\joao*"), a comparação é feita
+    com DOMINIO\usuario; caso contrário, apenas com o nome do usuário.
+    Padrão: *
+
+.PARAMETER UsuarioExato
+    Quando o -Usuario não tem curingas, aspas nem "\", aplica o filtro já
+    na consulta ao log (bem mais rápido em logs grandes). Atenção: nesse
+    modo a comparação diferencia maiúsculas de minúsculas, então digite o
+    usuário exatamente como aparece no log.
+
+.PARAMETER Computador
+    Um ou mais servidores de arquivos (ex.: "SRV1","SRV2").
+    Padrão: computador local.
+
+.PARAMETER IgnorarAtributos
+    Descarta eventos cujo acesso é apenas "ruído": ler atributos, ler
+    permissões, atravessar pasta e sincronizar. Máscaras com bits
+    desconhecidos NUNCA são descartadas.
+
+.PARAMETER Agrupar
+    Agrupa eventos repetidos dentro do mesmo minuto em uma única linha
+    (mesmo servidor, usuário, LogonId, IP, porta, objeto, AccessMask,
+    processo e resultado). A coluna Ocorrencias informa quantos eventos foram
+    consolidados. PrimeiroAcesso e UltimoAcesso preservam a janela do grupo;
+    RecordId e DataHora permanecem referentes ao evento mais recente.
+    O agrupamento é feito durante a leitura, o que economiza memória.
+
+.PARAMETER Resultado
+    Filtra o resultado da auditoria: Todos, Exito ou Falha.
+    Padrão: Todos. Para 4663, normalmente só existem eventos de êxito.
+    O filtro é aplicado já na consulta ao log (palavra-chave de auditoria).
+
+.PARAMETER IncluirContasComputador
+    Por padrão, contas terminadas em $ (ex.: SERVIDOR$) são ignoradas.
+    Use esta opção para incluí-las no relatório.
+
+.PARAMETER CsvSaida
+    Caminho opcional para exportar o relatório completo em CSV
+    (separador ";", UTF-8). Datas saem como yyyy-MM-dd HH:mm:ss e textos
+    iniciados por = + - @ ganham um apóstrofo para não virarem fórmula
+    no Excel. Aceita o token {data}, substituído por yyyyMMdd-HHmmss
+    (útil em execuções agendadas: "C:\Relatorios\acessos-{data}.csv").
+
+.PARAMETER ExcluirUsuarios
+    Um ou mais usuários/contas de serviço a ignorar (curingas aceitos), por
+    exemplo antivírus e backup: -ExcluirUsuarios "svc-backup","svc-av*".
+    A comparação é feita com o nome do usuário e com DOMINIO\usuario.
+
+.PARAMETER IncluirCompartilhamentosEspeciais
+    Por padrão, IPC$, ADMIN$, print$ e compartilhamentos de unidade (C$, D$...)
+    são ignorados nos eventos 5145/5140 (geram muito ruído). Use esta opção
+    para incluí-los.
+
+.PARAMETER ListarCompartilhamentos
+    Lista os compartilhamentos (não administrativos) de cada servidor via
+    Get-SmbShare e, no fim, mostra quais não tiveram acessos no período
+    (considerando os filtros aplicados). Não vale para o evento 4663.
+
+.PARAMETER ListaAutorizados
+    CSV (separador ";") com as colunas Pasta;Grupo (caminhos completos). Cada linha diz que os
+    membros (recursivo) do grupo do AD podem acessar o caminho exato de "Pasta" ou seus descendentes. Vale a regra mais específica (maior texto). A coluna
+    Autorizacao passa a ter: Autorizado, NAO AUTORIZADO, Sem regra ou
+    Indeterminado (grupo não lido). NAO AUTORIZADO é divergência da regra de negócio; 5145 não comprova leitura
+    de conteúdo. A associação AD é consultada no momento da execução. Requer o módulo ActiveDirectory (RSAT).
+    Veja ListaAutorizados-exemplo.csv.
+
+.PARAMETER EnriquecerAD
+    Preenche Departamento e Cargo de cada usuário (módulo ActiveDirectory).
+
+.PARAMETER ResolverIP
+    Preenche a coluna Estacao com o nome DNS reverso do IP (com cache).
+    Pode ser lento se o DNS reverso não estiver bem configurado.
+
+.PARAMETER CsvResumo
+    Exporta um CSV consolidado "usuário x pasta" (Acessos, Falhas, primeiro e
+    último acesso, quem liberou, grupo amplo, autorização), pronto para tabela
+    dinâmica. Aceita o token {data}.
+
+.PARAMETER Silencioso
+    Não imprime os resumos e o detalhamento no console (útil em tarefas
+    agendadas); avisos, CSV e contagens continuam.
+
+.PARAMETER GridView
+    Abre o resultado completo em Out-GridView (requer interface gráfica).
+
+.PARAMETER PassThru
+    Devolve os registros como objetos no pipeline, para uso em outros scripts.
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 7
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 3 -IgnorarAtributos -Agrupar -CsvSaida "C:\Temp\acessos.csv"
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "D:\Dados\RH\Folha" -Usuario "maria" -UsuarioExato -Dias 30 -EventoId 4663
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Inicio "2026-10-19 08:00" -Fim "2026-10-19 18:00" -Computador "SRV-ARQ1","SRV-ARQ2"
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 7 -Resultado Falha -CsvSaida "C:\Temp\falhas.csv"
+
+.EXAMPLE
+    .\Relatorio-AcessoPasta.ps1 -Pasta "Dados" -Dias 1 -IncluirContasComputador
+
+.EXAMPLE
+    # Todos os compartilhamentos, últimas 24h, sem contas de serviço
+    .\Relatorio-AcessoPasta.ps1 -Dias 1 -IgnorarAtributos -Agrupar -ExcluirUsuarios "svc-*" -CsvSaida "C:\Relatorios\acessos-{data}.csv" -CsvResumo "C:\Relatorios\resumo-{data}.csv"
+
+.EXAMPLE
+    # Cruza os acessos com a lista de autorizados e traz departamento/estação
+    .\Relatorio-AcessoPasta.ps1 -Dias 7 -Agrupar -ListaAutorizados "C:\Relatorios\autorizados.csv" -EnriquecerAD -ResolverIP -ListarCompartilhamentos -Computador "SRV-ARQ1","SRV-ARQ2"
+
+.NOTES
+    Para o evento 4663:
+        habilite auditoria de File System e configure a SACL da pasta.
+
+    Para o evento 5145:
+        Advanced Audit Policy > Object Access > Audit Detailed File Share
+
+    Para o evento 5140:
+        Advanced Audit Policy > Object Access > Audit File Share
+
+    Observação sobre Resultado:
+        4663 representa acesso efetivamente realizado e normalmente é Êxito.
+        5145 pode registrar Êxito ou Falha na verificação do acesso SMB.
+        Nem toda Falha do 5145 indica tentativa indevida: clientes costumam
+        sondar arquivos que não existem (desktop.ini, thumbs.db etc.).
+
+    Salve este arquivo como UTF-8 com BOM para o Windows PowerShell 5.1
+    exibir corretamente os acentos.
+
+    Leitura de servidores remotos: a conta precisa pertencer ao grupo
+    "Leitores do log de eventos" (Event Log Readers) ou ser administradora, e
+    a regra de firewall "Gerenciamento Remoto de Log de Eventos" deve estar
+    ativa. O script avisa quando o log de Segurança começa depois do início
+    do período (eventos já sobrescritos); considere aumentar o tamanho do log
+    por GPO e agendar a execução diária com -CsvSaida "...-{data}.csv".
+
+    Sobre AccessReason/ConcedidoPor: só existe no evento 5145. Com -Agrupar,
+    a razão exibida é a do primeiro evento de cada grupo.
+
+    Histórico:
+      v7 - -Pasta passou a ser opcional; ignora IPC$/ADMIN$/C$ por padrão;
+           novas colunas (UsuarioSid, TipoObjeto, AccessReason, ConcedidoPor,
+           PermissaoAmpla, PastaResumo, Estacao, Departamento, Cargo,
+           Autorizacao); novos parâmetros -ExcluirUsuarios, -ListarCompartilhamentos,
+           -ListaAutorizados, -EnriquecerAD, -ResolverIP, -CsvResumo,
+           -Silencioso, -GridView, -PassThru. Colunas e comportamento
+           anteriores foram mantidos.
+#>
+
+[CmdletBinding(DefaultParameterSetName = 'Dias')]
+param (
+
+    # v8: caminhos de autorização são completos; filtros -Pasta continuam por trecho.
+    [string]$ServidorAD,
+
+    [string]$CsvCobertura,
+
+    [string]$Pasta = '',
+
+    [Parameter(ParameterSetName = 'Dias')]
+    [ValidateRange(1, 3650)]
+    [int]$Dias = 1,
+
+    [Parameter(Mandatory = $true, ParameterSetName = 'Periodo')]
+    [datetime]$Inicio,
+
+    [Parameter(ParameterSetName = 'Periodo')]
+    [datetime]$Fim,
+
+    [ValidateSet(4663, 5145, 5140)]
+    [int]$EventoId = 5145,
+
+    [ValidateNotNullOrEmpty()]
+    [string]$Usuario = '*',
+
+    [switch]$UsuarioExato,
+
+    [ValidateNotNullOrEmpty()]
+    [string[]]$Computador = @($env:COMPUTERNAME),
+
+    [switch]$IgnorarAtributos,
+
+    [switch]$Agrupar,
+
+    [ValidateSet('Todos', 'Exito', 'Falha')]
+    [string]$Resultado = 'Todos',
+
+    [switch]$IncluirContasComputador,
+
+    [string]$CsvSaida,
+
+    [string[]]$ExcluirUsuarios = @(),
+
+    [switch]$IncluirCompartilhamentosEspeciais,
+
+    [switch]$ListarCompartilhamentos,
+
+    [string]$ListaAutorizados,
+
+    [switch]$EnriquecerAD,
+
+    [switch]$ResolverIP,
+
+    [string]$CsvResumo,
+
+    [switch]$Silencioso,
+
+    [switch]$GridView,
+
+    [switch]$PassThru
+)
+
+# ATENÇÃO: nomes de variáveis no PowerShell não diferenciam maiúsculas de
+# minúsculas. O parâmetro $Resultado (string com ValidateSet) NÃO pode ser
+# reutilizado para a lista de registros; por isso a lista se chama $registros.
+
+
+# ============================================================
+# Funções auxiliares
+# ============================================================
+
+function ConvertTo-AccessMask {
+
+    param (
+        [string]$Mask
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Mask)) {
+        return $null
+    }
+
+    $valor = $Mask.Trim()
+
+    # Remove prefixo 0x caso exista
+    if ($valor -match '^0x') {
+        $valor = $valor.Substring(2)
+    }
+
+    try {
+        return [Convert]::ToInt64($valor, 16)
+    }
+    catch {
+        return $null
+    }
+}
+
+
+function Get-TipoAcesso {
+
+    param (
+        [string]$Mask
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Mask)) {
+        return ''
+    }
+
+    $m = ConvertTo-AccessMask $Mask
+
+    if ($null -eq $m) {
+        return $Mask
+    }
+
+    $tipos = @()
+
+    # Direitos específicos de arquivos e diretórios
+    if ($m -band 0x1)      { $tipos += 'Leitura/Listagem' }
+    if ($m -band 0x2)      { $tipos += 'Gravação/Criação' }
+    if ($m -band 0x4)      { $tipos += 'Anexar dados/Criar subpasta' }
+    if ($m -band 0x8)      { $tipos += 'Ler atributos estendidos' }
+    if ($m -band 0x10)     { $tipos += 'Gravar atributos estendidos' }
+    if ($m -band 0x20)     { $tipos += 'Executar/Atravessar pasta' }
+    if ($m -band 0x40)     { $tipos += 'Excluir arquivo/subpasta filho' }
+    if ($m -band 0x80)     { $tipos += 'Ler atributos' }
+    if ($m -band 0x100)    { $tipos += 'Gravar atributos' }
+
+    # Direitos padrão do Windows
+    if ($m -band 0x10000)  { $tipos += 'Excluir' }
+    if ($m -band 0x20000)  { $tipos += 'Ler permissões' }
+    if ($m -band 0x40000)  { $tipos += 'Alterar permissões' }
+    if ($m -band 0x80000)  { $tipos += 'Alterar proprietário' }
+    if ($m -band 0x100000) { $tipos += 'Sincronizar' }
+
+    if ($tipos.Count -eq 0) {
+        return "Outro ($Mask)"
+    }
+
+    return ($tipos -join ', ')
+}
+
+
+# Retorna $true somente quando TODOS os bits da máscara são "ruído" conhecido
+# (ler atributos estendidos, atravessar pasta, ler atributos, ler permissões,
+# sincronizar). Qualquer bit desconhecido faz o evento ser MANTIDO: em auditoria
+# é melhor mostrar demais do que esconder algo em silêncio.
+function Test-AcessoRuido {
+
+    param (
+        [string]$Mask
+    )
+
+    $m = ConvertTo-AccessMask $Mask
+
+    if ($null -eq $m) {
+        return $false
+    }
+
+    $ruido = 0x8 -bor 0x20 -bor 0x80 -bor 0x20000 -bor 0x100000
+
+    return (($m -band (-bnot $ruido)) -eq 0)
+}
+
+
+function ConvertTo-XPathTime {
+
+    param (
+        [datetime]$Data
+    )
+
+    return $Data.ToUniversalTime().ToString(
+        "yyyy-MM-dd'T'HH:mm:ss.fff'Z'",
+        [System.Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
+
+# Evita que textos iniciados por = + - @ (ou tab/CR) sejam executados como
+# fórmula ao abrir o CSV no Excel.
+function Protect-CsvCell {
+
+    param (
+        [object]$Valor
+    )
+
+    $texto = [string]$Valor
+
+    if ($texto -match '^[=+\-@\t\r]') {
+        return "'" + $texto
+    }
+
+    return $texto
+}
+
+
+# Retorna $true quando o nome informado é o próprio computador (leitura local,
+# sem RPC).
+function Test-ServidorLocal {
+
+    param (
+        [string]$Nome
+    )
+
+    $locais = @('.', 'localhost', '127.0.0.1', $env:COMPUTERNAME)
+
+    if ($env:USERDNSDOMAIN) {
+        $locais += ($env:COMPUTERNAME + '.' + $env:USERDNSDOMAIN)
+    }
+
+    return ($locais -contains $Nome)
+}
+
+
+# Normaliza IPv4 mapeado em IPv6 (::ffff:10.0.0.5 -> 10.0.0.5).
+function ConvertTo-IpNormalizado {
+
+    param (
+        [string]$Ip
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Ip)) {
+        return ''
+    }
+
+    $valor = $Ip.Trim()
+
+    if ($valor -match '^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$') {
+        return $Matches[1]
+    }
+
+    return $valor
+}
+
+
+# Traduz um SID (ou apelido SDDL, como WD/AU/BU) para nome, com cache.
+function Resolve-SidConta {
+
+    param (
+        [string]$Sid
+    )
+
+    if ($script:cacheSid.ContainsKey($Sid)) {
+        return $script:cacheSid[$Sid]
+    }
+
+    $nome = $Sid
+
+    if ($Sid -like 'S-1-*') {
+
+        try {
+            $nome = ([System.Security.Principal.SecurityIdentifier]::new($Sid)).Translate(
+                [System.Security.Principal.NTAccount]).Value
+        }
+        catch {
+            $nome = $Sid
+        }
+    }
+    elseif ($script:aliasesSddl.ContainsKey($Sid)) {
+
+        $nome = $script:aliasesSddl[$Sid]
+    }
+
+    $script:cacheSid[$Sid] = $nome
+
+    return $nome
+}
+
+
+# Lê o AccessReason do evento 5145 (ACEs em SDDL) e devolve quem liberou o
+# acesso. "Ampla" = liberação por Everyone, Authenticated Users, Domain Users,
+# BUILTIN\Users ou NETWORK (detecção por SID, independente do idioma).
+function Get-ConcessaoAcesso {
+
+    param (
+        [string]$AccessReason
+    )
+
+    $saida = @{ Contas = ''; Ampla = $false }
+
+    if ([string]::IsNullOrWhiteSpace($AccessReason)) {
+        return $saida
+    }
+
+    $contas = New-Object 'System.Collections.Generic.List[string]'
+
+    $regexAce = [regex]'\((?<tipo>[A-Za-z]+);(?<flags>[A-Za-z]*);(?<dir>[0-9A-Za-z]*);[^;)]*;[^;)]*;(?<sid>[^;)]+)\)'
+
+    foreach ($m in $regexAce.Matches($AccessReason)) {
+
+        # Só interessam ACEs de permissão (A); negações (D) não "liberam"
+        if ($m.Groups['tipo'].Value -ne 'A') {
+            continue
+        }
+
+        $sid = $m.Groups['sid'].Value
+        $conta = Resolve-SidConta $sid
+
+        if (-not $contas.Contains($conta)) {
+            $contas.Add($conta)
+        }
+
+        if (
+            ($sid -in @('WD', 'AU', 'BU', 'DU', 'NU')) -or
+            ($sid -in @('S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-2')) -or
+            ($sid -match '^S-1-5-21-\d+-\d+-\d+-513$')
+        ) {
+            $saida.Ampla = $true
+        }
+    }
+
+    $saida.Contas = ($contas -join '; ')
+
+    return $saida
+}
+
+
+# Pasta usada nos resumos: compartilhamento + subpasta de 1º nível (5145/5140)
+# ou a raiz da unidade local (4663).
+function Get-PastaResumo {
+    param ([string]$Compartilhamento, [string]$CaminhoRelativo, [string]$CaminhoLocal)
+    # Sem consultar o objeto não é possível distinguir arquivo de pasta pelo nome.
+    if ($Compartilhamento) { return $Compartilhamento.TrimEnd('\') }
+    if ($CaminhoLocal -match '^[A-Za-z]:\\') { return $CaminhoLocal.Substring(0, 3) }
+    return ''
+}
+
+function ConvertTo-CaminhoRegra {
+    param ([string]$Caminho)
+    $valor = $Caminho.Trim().Replace('/', '\')
+    if ($valor -notmatch '^(\\\\[^\\]+\\[^\\]+|[A-Za-z]:\\)') {
+        throw "Use caminho completo UNC ou local na regra: '$Caminho'."
+    }
+    if ($valor -match '[*?]' -or $valor -match '(^|\\)\.{1,2}(\\|$)') {
+        throw "Curingas e segmentos relativos não são aceitos: '$Caminho'."
+    }
+    return $valor.TrimEnd('\')
+}
+
+function Get-StatusAutorizacao {
+    param ($Registro)
+    $melhor = -1
+    $grupos = @()
+    foreach ($regra in $regrasAutorizacao) {
+        $combina = $false
+        foreach ($caminho in @($Registro.Objeto, $Registro.CaminhoLocal)) {
+            if ([string]::IsNullOrWhiteSpace($caminho)) { continue }
+            $normal = ([string]$caminho).Replace('/', '\').TrimEnd('\')
+            if ($normal.Equals($regra.Pasta, [StringComparison]::OrdinalIgnoreCase) -or
+                $normal.StartsWith($regra.Pasta + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                $combina = $true
+            }
+        }
+        if (-not $combina) { continue }
+        if ($regra.Pasta.Length -gt $melhor) {
+            $melhor = $regra.Pasta.Length; $grupos = @($regra.Grupo)
+        } elseif ($regra.Pasta.Length -eq $melhor) { $grupos += $regra.Grupo }
+    }
+    if ($melhor -lt 0) { return 'Sem regra' }
+    $sid = [string]$Registro.UsuarioSid
+    if ($sid -notmatch '^S-1-\d+(-\d+)+$') { return 'Indeterminado' }
+    $faltante = $false
+    foreach ($grupo in ($grupos | Sort-Object -Unique)) {
+        if (-not $membrosPorGrupo.ContainsKey($grupo)) { $faltante = $true; continue }
+        if ($membrosPorGrupo[$grupo].Contains($sid)) { return 'Autorizado' }
+    }
+    if ($faltante) { return 'Indeterminado' }
+    return 'NAO AUTORIZADO'
+}
+
+function Export-Cobertura {
+    if (-not $CsvCobertura) { return }
+    $dir = Split-Path -Parent $CsvCobertura
+    if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $cobertura | Select-Object *, @{n='Limite';e={'Consulta de eventos; não comprova auditoria/SACL em todas as pastas. Grupos AD refletem o momento da coleta.'}} |
+        Export-Csv -LiteralPath $CsvCobertura -Delimiter ';' -NoTypeInformation -Encoding UTF8
+}
+
+# Informa tamanho do log de Segurança, evento mais antigo e (no servidor
+# local) a configuração da auditoria. Nunca interrompe o relatório.
+function Test-LogSeguranca {
+
+    param (
+        [string]$Servidor,
+        [datetime]$Inicio
+    )
+
+    $local = Test-ServidorLocal $Servidor
+
+    $cn = @{}
+
+    if (-not $local) {
+        $cn.ComputerName = $Servidor
+    }
+
+    try {
+
+        $log = Get-WinEvent -ListLog 'Security' -ErrorAction Stop @cn
+        $mb = [math]::Round($log.MaximumSizeInBytes / 1MB)
+        $coberturaAtual.LogVerificado = $true
+
+        $primeiro = Get-WinEvent -LogName 'Security' -MaxEvents 1 -Oldest -ErrorAction Stop @cn
+
+        Write-Host ("  Log de Segurança: máximo de {0} MB; evento mais antigo em {1}" -f
+            $mb, $primeiro.TimeCreated.ToString('dd/MM/yyyy HH:mm:ss')) -ForegroundColor DarkGray
+
+        if ($primeiro.TimeCreated -gt $Inicio) {
+            $coberturaAtual.RetencaoInsuficiente = $true
+
+            Write-Warning (
+                "[$Servidor] O log de Segurança começa em " +
+                $primeiro.TimeCreated.ToString('dd/MM/yyyy HH:mm:ss') +
+                ", depois do início do período: a cobertura anterior não pode ser confirmada (retenção, limpeza ou criação do log). " +
+                "Aumente o tamanho do log (GPO) ou encaminhe/exporte os eventos."
+            )
+        }
+        elseif ($EventoId -ne 4663 -and $mb -lt 1024) {
+
+            Write-Host "  Dica: o evento $EventoId gera muito volume; considere aumentar o log de Segurança (hoje $mb MB)." -ForegroundColor DarkYellow
+        }
+    }
+    catch {
+
+        Write-Verbose "[$Servidor] Não foi possível verificar o log de Segurança: $($_.Exception.Message)"
+    }
+
+    if ($local) {
+
+        # GUIDs das subcategorias (independem do idioma do Windows)
+        switch ($EventoId) {
+            4663 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
+            5145 { $guid = '{0CCE9244-69AE-11D9-BED3-505054503030}' }
+            5140 { $guid = '{0CCE9224-69AE-11D9-BED3-505054503030}' }
+        }
+
+        try {
+
+            $linha = & auditpol.exe /get "/subcategory:$guid" /r 2>$null |
+                Where-Object { $_ -match '\{0CCE' } |
+                Select-Object -First 1
+
+            if ($linha) {
+
+                $config = ($linha -split ',')[4]
+
+                Write-Host "  Auditoria da subcategoria do evento ${EventoId}: $config" -ForegroundColor DarkGray
+            }
+        }
+        catch {
+
+            Write-Verbose "Não foi possível consultar o auditpol: $($_.Exception.Message)"
+        }
+    }
+}
+
+
+# Lista os compartilhamentos não administrativos de um servidor.
+function Get-CompartilhamentosServidor {
+
+    param (
+        [string]$Servidor
+    )
+
+    try {
+
+        if (Test-ServidorLocal $Servidor) {
+
+            $shares = Get-SmbShare -Special:$false -ErrorAction Stop
+        }
+        else {
+
+            $cim = New-CimSession -ComputerName $Servidor -ErrorAction Stop
+
+            try {
+                $shares = Get-SmbShare -CimSession $cim -Special:$false -ErrorAction Stop
+            }
+            finally {
+                Remove-CimSession $cim -ErrorAction SilentlyContinue
+            }
+        }
+
+        return @($shares | Select-Object Name, Path, Description)
+    }
+    catch {
+
+        Write-Warning "[$Servidor] Não foi possível listar os compartilhamentos: $($_.Exception.Message)"
+
+        $coberturaAtual.FalhaInventario = $true
+        return @()
+    }
+}
+
+
+# Converte um evento do log em um registro de acesso.
+# Retorna $null quando o evento é filtrado ou não pôde ser processado.
+function Convert-EventoAcesso {
+
+    param (
+        [Parameter(Mandatory = $true)]
+        $Evento
+    )
+
+    $script:totalLidos++
+
+    try {
+
+        $xml = [xml]$Evento.ToXml()
+
+        $dado = @{}
+
+        foreach ($d in $xml.Event.EventData.Data) {
+
+            if ($null -ne $d.Name) {
+                $dado[$d.Name] = $d.'#text'
+            }
+        }
+
+
+        # Valores padrão
+        $objeto = ''
+        $caminhoLocal = ''
+        $ip = ''
+        $porta = ''
+        $acesso = ''
+        $processo = ''
+        $processId = ''
+        $handleId = ''
+        $compartilhamento = ''
+        $caminhoRelativo = ''
+
+
+        switch ($EventoId) {
+
+            # Evento 4663 - acesso efetivo a arquivo/pasta
+            4663 {
+
+                $objeto = [string]$dado['ObjectName']
+                $caminhoLocal = $objeto
+                $acesso = Get-TipoAcesso $dado['AccessMask']
+                $processo = [string]$dado['ProcessName']
+                $processId = [string]$dado['ProcessId']
+                $handleId = [string]$dado['HandleId']
+            }
+
+            # Evento 5145 - acesso detalhado via compartilhamento SMB
+            5145 {
+
+                $shareName = [string]$dado['ShareName']
+                if ($shareName.StartsWith('\\*\')) { $shareName = '\\' + $Evento.MachineName + $shareName.Substring(3) }
+                $relativeTarget = [string]$dado['RelativeTargetName']
+                $compartilhamento = $shareName
+                $caminhoRelativo = $relativeTarget
+
+                # ShareLocalPath vem como \??\D:\Dados\Financeiro
+                $raiz = ([string]$dado['ShareLocalPath'] -replace '^\\\?\?\\', '').TrimEnd('\')
+
+                if (-not [string]::IsNullOrWhiteSpace($relativeTarget)) {
+
+                    $objeto = $shareName.TrimEnd('\') + '\' + $relativeTarget.TrimStart('\')
+
+                    if (-not [string]::IsNullOrWhiteSpace($raiz)) {
+                        $caminhoLocal = $raiz + '\' + $relativeTarget.TrimStart('\')
+                    }
+                }
+                else {
+
+                    $objeto = $shareName
+                    $caminhoLocal = $raiz
+                }
+
+                $ip = ConvertTo-IpNormalizado ([string]$dado['IpAddress'])
+                $porta = [string]$dado['IpPort']
+                $acesso = Get-TipoAcesso $dado['AccessMask']
+            }
+
+            # Evento 5140 - conexão ao compartilhamento
+            5140 {
+
+                $objeto = [string]$dado['ShareName']
+                if ($objeto.StartsWith('\\*\')) { $objeto = '\\' + $Evento.MachineName + $objeto.Substring(3) }
+                $compartilhamento = $objeto
+                $caminhoLocal = ([string]$dado['ShareLocalPath'] -replace '^\\\?\?\\', '').TrimEnd('\')
+                $ip = ConvertTo-IpNormalizado ([string]$dado['IpAddress'])
+                $porta = [string]$dado['IpPort']
+                $acesso = 'Conexão ao compartilhamento'
+            }
+        }
+
+
+        # Usuário
+        $user = [string]$dado['SubjectUserName']
+        $domain = [string]$dado['SubjectDomainName']
+        $logonId = [string]$dado['SubjectLogonId']
+
+        # Ignora eventos sem usuário
+        if ([string]::IsNullOrWhiteSpace($user)) {
+            return $null
+        }
+
+        # Ignora contas de computador, salvo quando solicitado explicitamente
+        if (-not $IncluirContasComputador -and $user -like '*$') {
+            $script:ignoradosComputadores++
+            return $null
+        }
+
+        # Ignora compartilhamentos administrativos (IPC$, ADMIN$, C$...), que
+        # geram muito ruído nos eventos 5145/5140
+        if (
+            -not $IncluirCompartilhamentosEspeciais -and
+            $EventoId -ne 4663 -and
+            $compartilhamento -match '\\(IPC\$|ADMIN\$|print\$|[A-Za-z]\$)$'
+        ) {
+            $script:ignoradosEspeciais++
+            return $null
+        }
+
+        # Contas excluídas explicitamente (-ExcluirUsuarios)
+        if ($ExcluirUsuarios.Count -gt 0) {
+
+            $usuarioDominio = $user
+
+            if (-not [string]::IsNullOrWhiteSpace($domain)) {
+                $usuarioDominio = "$domain\$user"
+            }
+
+            foreach ($padraoExcluir in $ExcluirUsuarios) {
+
+                if ($user -like $padraoExcluir -or $usuarioDominio -like $padraoExcluir) {
+                    $script:ignoradosExcluidos++
+                    return $null
+                }
+            }
+        }
+
+        # Filtro de usuário (com curingas). Se o filtro contiver "\", compara
+        # com DOMINIO\usuario; caso contrário, só com o nome do usuário.
+        $nomeParaFiltro = $user
+
+        if ($Usuario -match '\\' -and -not [string]::IsNullOrWhiteSpace($domain)) {
+            $nomeParaFiltro = "$domain\$user"
+        }
+
+        if ($nomeParaFiltro -notlike $Usuario) {
+            return $null
+        }
+
+        # Filtro de pasta/arquivo: caminho de rede OU caminho local completo.
+        # O nome do processo (4663) não participa do filtro.
+        $correspondeObjeto =
+            -not [string]::IsNullOrWhiteSpace($objeto) -and
+            $objeto -like $padraoPasta
+
+        $correspondeLocal =
+            -not [string]::IsNullOrWhiteSpace($caminhoLocal) -and
+            $caminhoLocal -like $padraoPasta
+
+        if (-not $correspondeObjeto -and -not $correspondeLocal) {
+            return $null
+        }
+
+        # Descarta acessos que são só "ruído" (opcional)
+        if ($IgnorarAtributos -and $EventoId -ne 5140 -and (Test-AcessoRuido $dado['AccessMask'])) {
+            $script:ignoradosRuido++
+            return $null
+        }
+
+        # Êxito ou Falha (palavras-chave de auditoria do evento)
+        $resultadoAcesso = 'Êxito'
+
+        if ($Evento.Keywords -band 0x10000000000000) {
+            $resultadoAcesso = 'Falha'
+        }
+
+        # Filtro por resultado (também aplicado na consulta XPath; mantido
+        # aqui como garantia)
+        if ($Resultado -eq 'Exito' -and $resultadoAcesso -ne 'Êxito') {
+            return $null
+        }
+
+        if ($Resultado -eq 'Falha' -and $resultadoAcesso -ne 'Falha') {
+            return $null
+        }
+
+        # domínio\usuário
+        if ([string]::IsNullOrWhiteSpace($domain)) {
+            $usuarioCompleto = $user
+        }
+        else {
+            $usuarioCompleto = "$domain\$user"
+        }
+
+        # AccessList vem com códigos (%%4416...) separados por tabs/quebras de
+        # linha; normaliza os espaços para não bagunçar o CSV.
+        $listaAcesso = ([string]$dado['AccessList'] -replace '\s+', ' ').Trim()
+
+        # AccessReason (5145): informa qual ACE liberou o acesso. Resolve os
+        # SIDs para nomes e sinaliza liberação por grupo amplo.
+        $razaoAcesso = ([string]$dado['AccessReason'] -replace '\s+', ' ').Trim()
+        $concedidoPor = ''
+        $permissaoAmpla = ''
+
+        if ($EventoId -eq 5145 -and -not [string]::IsNullOrWhiteSpace($razaoAcesso)) {
+
+            $concessao = Get-ConcessaoAcesso $razaoAcesso
+            $concedidoPor = $concessao.Contas
+
+            if ($concessao.Ampla) {
+                $permissaoAmpla = 'Sim'
+            }
+            else {
+                $permissaoAmpla = 'Nao'
+            }
+        }
+
+        $pastaResumo = Get-PastaResumo `
+            -Compartilhamento $compartilhamento `
+            -CaminhoRelativo $caminhoRelativo `
+            -CaminhoLocal $caminhoLocal
+
+
+        return [PSCustomObject]@{
+
+            DataHora         = $Evento.TimeCreated
+            PrimeiroAcesso   = $Evento.TimeCreated
+            UltimoAcesso     = $Evento.TimeCreated
+            Servidor         = $Evento.MachineName
+            RecordId         = $Evento.RecordId
+            Usuario          = $usuarioCompleto
+            Resultado        = $resultadoAcesso
+            IP               = $ip
+            Porta            = $porta
+            Acesso           = $acesso
+            AccessList       = $listaAcesso
+            AccessMask       = [string]$dado['AccessMask']
+            Objeto           = $objeto
+            Compartilhamento = $compartilhamento
+            CaminhoRelativo  = $caminhoRelativo
+            CaminhoLocal     = $caminhoLocal
+            Processo         = $processo
+            ProcessId        = $processId
+            HandleId         = $handleId
+            LogonId          = $logonId
+            EventoId         = $Evento.Id
+            Ocorrencias      = 1
+            UsuarioSid       = [string]$dado['SubjectUserSid']
+            TipoObjeto       = [string]$dado['ObjectType']
+            AccessReason     = $razaoAcesso
+            ConcedidoPor     = $concedidoPor
+            PermissaoAmpla   = $permissaoAmpla
+            PastaResumo      = $pastaResumo
+            Estacao          = ''
+            Departamento     = ''
+            Cargo            = ''
+            Autorizacao      = ''
+            NaturezaEvento   = switch ($EventoId) {
+                5145 { 'Verificação de acesso SMB (não comprova leitura do conteúdo)' }
+                4663 { 'Uso de direito auditado no objeto (ver AccessMask)' }
+                5140 { 'Conexão ao compartilhamento (sem detalhe de arquivo)' }
+            }
+        }
+
+    }
+    catch {
+
+        $script:falhasParse++
+
+        Write-Verbose (
+            "Erro ao processar evento RecordId " +
+            "$($Evento.RecordId): $($_.Exception.Message)"
+        )
+
+        return $null
+    }
+}
+
+
+# ============================================================
+# Configuração inicial
+# ============================================================
+
+if ($PSCmdlet.ParameterSetName -eq 'Periodo') {
+
+    $dataInicio = $Inicio
+    $usaFim = $PSBoundParameters.ContainsKey('Fim')
+
+    if ($usaFim) {
+        $dataFim = $Fim
+    }
+    else {
+        $dataFim = Get-Date
+    }
+
+    if ($dataFim -le $dataInicio) {
+        Write-Error '-Fim deve ser posterior a -Inicio.'
+        return
+    }
+}
+else {
+
+    $dataInicio = (Get-Date).AddDays(-$Dias)
+    $dataFim = Get-Date
+    $usaFim = $false
+}
+
+$usaFim = $true # Uma única janela fechada para todos os servidores.
+
+# Padrão de busca da pasta com caracteres especiais escapados ([ ] * ?)
+# (sem -Pasta, o filtro de pasta fica aberto e considera tudo)
+if ([string]::IsNullOrWhiteSpace($Pasta)) {
+    $padraoPasta = '*'
+}
+else {
+    $padraoPasta = '*' + [WildcardPattern]::Escape($Pasta) + '*'
+}
+
+# Contadores de controle
+$totalLidos = 0
+$falhasParse = 0
+$ignoradosRuido = 0
+$ignoradosEspeciais = 0
+$ignoradosExcluidos = 0
+$ignoradosComputadores = 0
+
+# Cache de resolução de SIDs e apelidos SDDL usados no AccessReason (5145)
+$cacheSid = @{}
+$aliasesSddl = @{
+    WD = 'Everyone'
+    AU = 'NT AUTHORITY\Authenticated Users'
+    BU = 'BUILTIN\Users'
+    BA = 'BUILTIN\Administrators'
+    SY = 'NT AUTHORITY\SYSTEM'
+    DU = 'Domain Users'
+    DA = 'Domain Admins'
+    DG = 'Domain Guests'
+    DC = 'Domain Computers'
+    DD = 'Domain Controllers'
+    CO = 'CREATOR OWNER'
+    CG = 'CREATOR GROUP'
+    IU = 'NT AUTHORITY\INTERACTIVE'
+    NU = 'NT AUTHORITY\NETWORK'
+    AN = 'NT AUTHORITY\ANONYMOUS LOGON'
+    LS = 'NT AUTHORITY\LOCAL SERVICE'
+    NS = 'NT AUTHORITY\NETWORK SERVICE'
+    BO = 'BUILTIN\Backup Operators'
+    SO = 'BUILTIN\Server Operators'
+    AO = 'BUILTIN\Account Operators'
+    BG = 'BUILTIN\Guests'
+    RD = 'BUILTIN\Remote Desktop Users'
+}
+
+$carimboExecucao = Get-Date -Format 'yyyyMMdd-HHmmss'
+$cobertura = New-Object 'System.Collections.Generic.List[object]'
+if ($CsvSaida -and -not $CsvCobertura) { $CsvCobertura = $CsvSaida + '.cobertura.csv' }
+if ($CsvCobertura) { $CsvCobertura = $CsvCobertura -replace '\{data\}', ($carimboExecucao) }
+
+$listaShares = New-Object 'System.Collections.Generic.List[object]'
+
+# Token {data} nos caminhos de CSV (útil em execuções agendadas)
+if (-not [string]::IsNullOrWhiteSpace($CsvSaida)) {
+    $CsvSaida = $CsvSaida -replace '\{data\}', ($carimboExecucao)
+}
+
+if (-not [string]::IsNullOrWhiteSpace($CsvResumo)) {
+    $CsvResumo = $CsvResumo -replace '\{data\}', ($carimboExecucao)
+}
+
+$servidoresComErro = New-Object 'System.Collections.Generic.List[string]'
+$servidoresSemEventos = New-Object 'System.Collections.Generic.List[string]'
+
+if ($usaFim) {
+    $textoFim = $dataFim.ToString('dd/MM/yyyy HH:mm:ss')
+}
+else {
+    $textoFim = 'agora'
+}
+
+
+Write-Host ''
+Write-Host '============================================================' -ForegroundColor DarkGray
+Write-Host ' RELATÓRIO DE AUDITORIA DE ACESSOS' -ForegroundColor Cyan
+Write-Host '============================================================' -ForegroundColor DarkGray
+
+Write-Host "Servidor(es): $($Computador -join ', ')"
+Write-Host "Evento      : $EventoId"
+if ([string]::IsNullOrWhiteSpace($Pasta)) {
+    Write-Host 'Filtro      : (todas as pastas/compartilhamentos)'
+}
+else {
+    Write-Host "Filtro      : $Pasta"
+}
+Write-Host "Usuário     : $Usuario"
+Write-Host "Resultado   : $Resultado"
+Write-Host "Período     : $($dataInicio.ToString('dd/MM/yyyy HH:mm:ss')) até $textoFim"
+
+Write-Host '============================================================' -ForegroundColor DarkGray
+Write-Host ''
+
+
+# ============================================================
+# Lista de autorizados (opcional)
+# ============================================================
+
+$regrasAutorizacao = @()
+$membrosPorGrupo = @{}
+$gruposFalhos = New-Object 'System.Collections.Generic.List[string]'
+
+if (-not [string]::IsNullOrWhiteSpace($ListaAutorizados)) {
+
+    if (-not (Test-Path -LiteralPath $ListaAutorizados)) {
+        Write-Error "Arquivo de autorizados não encontrado: $ListaAutorizados"
+        return
+    }
+
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+        Write-Error 'O módulo ActiveDirectory (RSAT) é necessário para usar -ListaAutorizados.'
+        return
+    }
+
+    Import-Module ActiveDirectory -ErrorAction Stop
+
+    $linhasLista = @(Import-Csv -LiteralPath $ListaAutorizados -Delimiter ';' -Encoding UTF8)
+
+    foreach ($linha in $linhasLista) {
+
+        $pastaRegra = ([string]$linha.Pasta).Trim()
+        $grupoRegra = ([string]$linha.Grupo).Trim()
+
+        if (-not $pastaRegra -or -not $grupoRegra) { throw 'Linha inválida na lista: Pasta e Grupo são obrigatórios.' }
+        if ($pastaRegra -and $grupoRegra) {
+
+            $regrasAutorizacao += [PSCustomObject]@{
+                Pasta = ConvertTo-CaminhoRegra $pastaRegra
+                Grupo = $grupoRegra
+            }
+        }
+    }
+
+    if ($regrasAutorizacao.Count -eq 0) {
+        Write-Error "Nenhuma regra válida em '$ListaAutorizados' (use as colunas Pasta;Grupo, separadas por ';')."
+        return
+    }
+
+    $gruposDistintos = @($regrasAutorizacao | ForEach-Object { $_.Grupo } | Sort-Object -Unique)
+
+    foreach ($grupo in $gruposDistintos) {
+
+        $nomeGrupo = $grupo
+        $adParams = @{}
+        if ($ServidorAD) { $adParams.Server = $ServidorAD }
+        if ($grupo -match '^([^\\]+)\\(.+)$') {
+            $nomeGrupo = $Matches[2]
+            if (-not $ServidorAD) { $adParams.Server = $Matches[1] }
+        }
+
+        try {
+
+            $membros = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+
+            $pendentes = New-Object 'System.Collections.Generic.Queue[object]'
+            $visitados = New-Object 'System.Collections.Generic.HashSet[string]'
+            $grupoInicial = Get-ADGroup -Identity $nomeGrupo -Properties primaryGroupToken @adParams -ErrorAction Stop
+            $pendentesDominioInicial = ($grupoInicial.DistinguishedName -split ',' | Where-Object { $_ -like 'DC=*' }) -join ','
+            $pendentes.Enqueue($grupoInicial)
+            while ($pendentes.Count -gt 0) {
+                $gAD = $pendentes.Dequeue()
+                if (-not $visitados.Add([string]$gAD.SID)) { continue }
+                if (-not $gAD.primaryGroupToken) { throw 'Não foi possível consultar o grupo primário.' }
+                $baseDominio = ($gAD.DistinguishedName -split ',' | Where-Object { $_ -like 'DC=*' }) -join ','
+                if (-not $baseDominio) { throw 'Domínio do grupo não identificado.' }
+                $dominioGrupo = (($baseDominio -split ',') -replace '^DC=', '') -join '.'
+                $consulta = @{Server=$dominioGrupo}
+                if ($ServidorAD -and $dominioGrupo -eq ((($pendentesDominioInicial -split ',') -replace '^DC=', '') -join '.')) {
+                    $consulta.Server = $ServidorAD
+                }
+                # Consulta direta para incluir os grupos primários também nos grupos aninhados.
+                Get-ADGroupMember -Identity $gAD.DistinguishedName @consulta -ErrorAction Stop |
+                    ForEach-Object {
+                        if (-not $_.SID) { throw 'Membro sem SID: consulta incompleta.' }
+                        if ($_.objectClass -eq 'group') {
+                            $dominioMembro = (($_.DistinguishedName -split ',' | Where-Object { $_ -like 'DC=*' }) -replace '^DC=', '') -join '.'
+                            $pendentes.Enqueue((Get-ADGroup -Identity $_.DistinguishedName -Properties primaryGroupToken -Server $dominioMembro -ErrorAction Stop))
+                        } elseif ($_.objectClass -eq 'foreignSecurityPrincipal') {
+                            throw 'Membro estrangeiro não resolvido: autorização indeterminada.'
+                        } else { [void]$membros.Add([string]$_.SID) }
+                    }
+                Get-ADUser -LDAPFilter "(primaryGroupID=$($gAD.primaryGroupToken))" -SearchBase $baseDominio @consulta -ErrorAction Stop |
+                    ForEach-Object {
+                        if (-not $_.SID) { throw 'Usuário sem SID: consulta incompleta.' }
+                        [void]$membros.Add([string]$_.SID)
+                    }
+            }
+
+            $membrosPorGrupo[$grupo] = $membros
+        }
+        catch {
+
+            $gruposFalhos.Add($grupo)
+            Write-Warning "Grupo '$grupo' não pôde ser lido: $($_.Exception.Message)"
+        }
+    }
+
+    Write-Host "Autorizados : $($regrasAutorizacao.Count) regra(s); $($membrosPorGrupo.Count) de $($gruposDistintos.Count) grupo(s) lidos" -ForegroundColor DarkGray
+    Write-Host ''
+}
+
+
+# ============================================================
+# Montagem do filtro XPath (aplicado direto no log)
+# ============================================================
+
+$clausulaTempo = "@SystemTime>='$(ConvertTo-XPathTime $dataInicio)'"
+
+if ($usaFim) {
+    $clausulaTempo += " and @SystemTime<='$(ConvertTo-XPathTime $dataFim)'"
+}
+
+$condicoesSistema = "(EventID=$EventoId)"
+
+# Palavras-chave de auditoria: Falha = 0x10000000000000, Êxito = 0x20000000000000
+# (mesma sintaxe band() das exibições personalizadas do Visualizador de Eventos)
+if ($Resultado -eq 'Falha') {
+    $condicoesSistema += ' and band(Keywords,4503599627370496)'
+}
+elseif ($Resultado -eq 'Exito') {
+    $condicoesSistema += ' and band(Keywords,9007199254740992)'
+}
+
+$condicoesSistema += " and TimeCreated[$clausulaTempo]"
+
+$xpath = "*[System[$condicoesSistema]"
+
+# Filtro de usuário na consulta (opcional, mais rápido; diferencia maiúsculas).
+# Se houver aspas ou "\" no nome, o filtro fica apenas no PowerShell para evitar
+# incompatibilidades com o subconjunto XPath aceito pelo Event Log.
+if (
+    $UsuarioExato -and
+    $Usuario -notmatch '[\*\?\[\]\\]' -and
+    $Usuario -notmatch '["'']'
+) {
+
+    $xpath += " and EventData[Data[@Name='SubjectUserName']='$Usuario']"
+}
+elseif ($UsuarioExato) {
+
+    Write-Verbose 'Nome de usuário com curinga, aspas ou "\"; filtro XPath otimizado não será aplicado.'
+}
+
+$xpath += ']'
+
+Write-Verbose "XPath: $xpath"
+
+
+# ============================================================
+# Consulta e processamento (streaming, servidor por servidor)
+# ============================================================
+
+$registros = New-Object 'System.Collections.Generic.List[object]'
+$indiceGrupos = @{}
+
+foreach ($servidor in ($Computador | Sort-Object -Unique)) {
+    $coberturaAtual = [pscustomobject]@{
+        Servidor = Protect-CsvCell $servidor
+        Inicio = $dataInicio.ToString('o'); Fim = $dataFim.ToString('o')
+        EventoId = $EventoId; Estado = 'Consultando'
+        FiltroPasta = Protect-CsvCell $Pasta; FiltroUsuario = Protect-CsvCell $Usuario
+        FiltroResultado = $Resultado; GruposADFalhos = $gruposFalhos.Count
+        Agrupado = [bool]$Agrupar; ContasComputadorIncluidas = [bool]$IncluirContasComputador
+        CompartilhamentosEspeciaisIncluidos = [bool]$IncluirCompartilhamentosEspeciais
+        LogVerificado = $false; RetencaoInsuficiente = $false; FalhaInventario = $false
+        EventosLidos = 0; FalhasConversao = 0; DescartadosEspeciais = 0
+        DescartadosRuido = 0; DescartadosUsuarios = 0; DescartadosComputadores = 0; Erro = ''
+    }
+    $cobertura.Add($coberturaAtual)
+    $antes = @($totalLidos, $falhasParse, $ignoradosEspeciais, $ignoradosRuido, $ignoradosExcluidos, $ignoradosComputadores)
+
+
+    Write-Host "Consultando log de Segurança em $servidor..." -ForegroundColor Cyan
+
+    Test-LogSeguranca -Servidor $servidor -Inicio $dataInicio
+
+    if ($ListarCompartilhamentos) {
+
+        $sharesServidor = @(Get-CompartilhamentosServidor -Servidor $servidor)
+
+        foreach ($sh in $sharesServidor) {
+
+            $listaShares.Add([PSCustomObject]@{
+                Servidor  = $servidor
+                Nome      = $sh.Name
+                Caminho   = $sh.Path
+                Descricao = $sh.Description
+            })
+        }
+
+        if (-not $Silencioso -and $sharesServidor.Count -gt 0) {
+
+            Write-Host "  Compartilhamentos em ${servidor}: $($sharesServidor.Count)" -ForegroundColor DarkGray
+
+            $sharesServidor |
+                Format-Table Name, Path -AutoSize |
+                Out-Host
+        }
+    }
+
+    # Servidor local: lê direto, sem RPC (-ComputerName só para remotos)
+    $parametrosLog = @{
+        LogName     = 'Security'
+        FilterXPath = $xpath
+        ErrorAction = 'Stop'
+    }
+
+    if (-not (Test-ServidorLocal $servidor)) {
+        $parametrosLog.ComputerName = $servidor
+    }
+
+    try {
+
+        Get-WinEvent @parametrosLog |
+            ForEach-Object {
+
+                $registro = Convert-EventoAcesso -Evento $_
+
+                if ($null -eq $registro) {
+                    return
+                }
+
+                if ($Agrupar) {
+
+                    # JSON evita colisões por delimitadores presentes nos caminhos.
+                    # Não mistura identidades, ACEs, processos ou handles diferentes.
+                    $chave = ConvertTo-Json -Compress -InputObject @(
+                        $registro.Servidor, $registro.UsuarioSid, $registro.Usuario,
+                        $registro.LogonId, $registro.IP, $registro.Porta, $registro.Objeto,
+                        $registro.AccessMask, $registro.Processo, $registro.ProcessId,
+                        $registro.HandleId, $registro.Resultado, $registro.AccessReason,
+                        $registro.DataHora.ToString('yyyyMMddHHmm')
+                    )
+
+                    if ($indiceGrupos.ContainsKey($chave)) {
+
+                        $grupo = $indiceGrupos[$chave]
+                        $grupo.Ocorrencias++
+
+                        # Preserva a janela temporal do grupo e mantém DataHora/RecordId
+                        # referentes ao evento mais recente.
+                        if ($registro.DataHora -lt $grupo.PrimeiroAcesso) {
+                            $grupo.PrimeiroAcesso = $registro.DataHora
+                        }
+
+                        if ($registro.DataHora -gt $grupo.UltimoAcesso) {
+                            $grupo.UltimoAcesso = $registro.DataHora
+                        }
+
+                        if ($registro.DataHora -gt $grupo.DataHora) {
+                            $grupo.DataHora = $registro.DataHora
+                            $grupo.RecordId = $registro.RecordId
+                        }
+                    }
+                    else {
+
+                        $indiceGrupos[$chave] = $registro
+                        $registros.Add($registro)
+                    }
+                }
+                else {
+
+                    $registros.Add($registro)
+                }
+            }
+
+    }
+    catch {
+
+        # Detecção independente do idioma do Windows
+        if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
+
+            $coberturaAtual.Estado = 'Sem eventos correspondentes'
+            $servidoresSemEventos.Add($servidor)
+            continue
+        }
+
+        Write-Warning "[$servidor] Falha ao ler o log de Segurança: $($_.Exception.Message)"
+
+        $coberturaAtual.Estado = 'Falha de leitura'
+        $coberturaAtual.Erro = Protect-CsvCell $_.Exception.Message
+        $servidoresComErro.Add($servidor)
+        continue
+    }
+    finally {
+        if ($coberturaAtual.Estado -eq 'Consultando') { $coberturaAtual.Estado = 'Consulta concluída' }
+        if ($coberturaAtual.Estado -eq 'Consulta concluída' -and ($falhasParse -gt $antes[1] -or $coberturaAtual.FalhaInventario -or $coberturaAtual.RetencaoInsuficiente -or -not $coberturaAtual.LogVerificado)) { $coberturaAtual.Estado = 'Consulta com cobertura limitada' }
+        $coberturaAtual.EventosLidos = $totalLidos - $antes[0]
+        $coberturaAtual.FalhasConversao = $falhasParse - $antes[1]
+        $coberturaAtual.DescartadosEspeciais = $ignoradosEspeciais - $antes[2]
+        $coberturaAtual.DescartadosRuido = $ignoradosRuido - $antes[3]
+        $coberturaAtual.DescartadosUsuarios = $ignoradosExcluidos - $antes[4]
+        $coberturaAtual.DescartadosComputadores = $ignoradosComputadores - $antes[5]
+    }
+}
+Export-Cobertura
+
+
+# ============================================================
+# Verificar resultado
+# ============================================================
+
+if ($registros.Count -eq 0) {
+
+    Write-Host ''
+    Write-Warning "Nenhum acesso encontrado para '$Pasta' no período informado."
+
+    Write-Host ''
+    Write-Host 'Possíveis motivos:' -ForegroundColor Yellow
+    Write-Host ' - A pasta não teve acesso no período.'
+    Write-Host ' - O evento escolhido não está sendo auditado.'
+    Write-Host ' - O nome informado em -Pasta não corresponde ao log.'
+    Write-Host ' - O log de Segurança já sobrescreveu eventos antigos.'
+
+    if ($UsuarioExato) {
+        Write-Host ' - Com -UsuarioExato a comparação diferencia maiúsculas de minúsculas.'
+    }
+
+    if ($Resultado -ne 'Todos') {
+        Write-Host " - O filtro -Resultado $Resultado pode estar excluindo os eventos existentes."
+    }
+
+    if ($servidoresSemEventos.Count -gt 0) {
+        Write-Host " - Sem eventos do tipo $EventoId em: $($servidoresSemEventos -join ', ')."
+    }
+
+    if ($servidoresComErro.Count -gt 0) {
+        Write-Host " - Falha de leitura em: $($servidoresComErro -join ', ') (execute como Administrador; verifique RPC/firewall)."
+    }
+
+    if ($ignoradosRuido -gt 0) {
+        Write-Host " - $ignoradosRuido evento(s) foram descartados por -IgnorarAtributos."
+    }
+
+    if ($ignoradosEspeciais -gt 0) {
+        Write-Host " - $ignoradosEspeciais evento(s) de compartilhamentos administrativos (IPC$, ADMIN$, C$...) foram descartados; use -IncluirCompartilhamentosEspeciais para vê-los."
+    }
+
+    if ($ignoradosExcluidos -gt 0) {
+        Write-Host " - $ignoradosExcluidos evento(s) foram descartados por -ExcluirUsuarios."
+    }
+
+    if ($falhasParse -gt 0) {
+        Write-Warning "$falhasParse evento(s) não puderam ser processados (use -Verbose para detalhes)."
+    }
+
+    return
+}
+
+
+# ============================================================
+# Ordenação e totais
+# ============================================================
+
+$registros = @(
+    $registros |
+    Sort-Object DataHora -Descending
+)
+
+# Status de autorização (lista de autorizados)
+if ($regrasAutorizacao.Count -gt 0) {
+
+    foreach ($r in $registros) {
+        $r.Autorizacao = Get-StatusAutorizacao $r
+    }
+}
+
+# Departamento e cargo (AD), com cache por usuário
+if ($EnriquecerAD) {
+
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+
+        Write-Warning 'Módulo ActiveDirectory não encontrado; -EnriquecerAD foi ignorado.'
+    }
+    else {
+
+        Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+
+        $cacheAD = @{}
+        $enriquecimentoAD = @{}
+        if ($ServidorAD) { $enriquecimentoAD.Server = $ServidorAD }
+
+        foreach ($r in $registros) {
+
+            $sam = [string]$r.UsuarioSid
+            if (-not $sam) { continue }
+
+            if (-not $cacheAD.ContainsKey($sam)) {
+
+                try {
+
+                    $u = Get-ADUser -Identity $sam -Properties Department, Title @enriquecimentoAD -ErrorAction Stop
+
+                    $cacheAD[$sam] = [PSCustomObject]@{
+                        Departamento = [string]$u.Department
+                        Cargo        = [string]$u.Title
+                    }
+                }
+                catch {
+
+                    $cacheAD[$sam] = [PSCustomObject]@{ Departamento = ''; Cargo = '' }
+                }
+            }
+
+            $r.Departamento = $cacheAD[$sam].Departamento
+            $r.Cargo = $cacheAD[$sam].Cargo
+        }
+    }
+}
+
+# Nome da estação (DNS reverso), com cache por IP
+if ($ResolverIP) {
+
+    $cacheIP = @{}
+
+    foreach ($r in $registros) {
+
+        if ([string]::IsNullOrWhiteSpace($r.IP)) {
+            continue
+        }
+
+        if (-not $cacheIP.ContainsKey($r.IP)) {
+
+            $nomeEstacao = ''
+
+            try {
+                $nomeEstacao = [System.Net.Dns]::GetHostEntry($r.IP).HostName
+            }
+            catch {
+                $nomeEstacao = ''
+            }
+
+            $cacheIP[$r.IP] = $nomeEstacao
+        }
+
+        $r.Estacao = $cacheIP[$r.IP]
+    }
+}
+
+$totalEventos = ($registros | Measure-Object Ocorrencias -Sum).Sum
+$totalFalhas = [int](
+    ($registros | Where-Object { $_.Resultado -eq 'Falha' } |
+        Measure-Object Ocorrencias -Sum).Sum
+)
+
+Write-Host ''
+Write-Host "$totalEventos acesso(s) encontrado(s) em $($registros.Count) linha(s); $totalFalhas com falha." -ForegroundColor Green
+Write-Host "Eventos lidos no log: $totalLidos"
+Write-Host ''
+
+
+if (-not $Silencioso) {
+
+    # ============================================================
+    # Resumo por usuário
+    # ============================================================
+
+    Write-Host '============================================================' -ForegroundColor DarkGray
+    Write-Host ' RESUMO POR USUÁRIO' -ForegroundColor Cyan
+    Write-Host '============================================================' -ForegroundColor DarkGray
+
+    $registros |
+        Group-Object Usuario |
+        ForEach-Object {
+
+            [PSCustomObject]@{
+                Usuario      = $_.Name
+                Acessos      = ($_.Group | Measure-Object Ocorrencias -Sum).Sum
+                Falhas       = [int](
+                    ($_.Group | Where-Object { $_.Resultado -eq 'Falha' } |
+                        Measure-Object Ocorrencias -Sum).Sum
+                )
+                UltimoAcesso = ($_.Group | Measure-Object DataHora -Maximum).Maximum
+            }
+        } |
+        Sort-Object Acessos -Descending |
+        Format-Table -AutoSize |
+        Out-Host
+
+
+    # ============================================================
+    # Resumo por IP
+    # ============================================================
+
+    if ($registros | Where-Object { -not [string]::IsNullOrWhiteSpace($_.IP) }) {
+
+        Write-Host ''
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' RESUMO POR IP' -ForegroundColor Cyan
+        Write-Host '============================================================' -ForegroundColor DarkGray
+
+        $registros |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.IP) } |
+            Group-Object IP |
+            ForEach-Object {
+
+                [PSCustomObject]@{
+                    IP           = $_.Name
+                    Acessos      = ($_.Group | Measure-Object Ocorrencias -Sum).Sum
+                    UltimoAcesso = ($_.Group | Measure-Object DataHora -Maximum).Maximum
+                }
+            } |
+            Sort-Object Acessos -Descending |
+            Format-Table -AutoSize |
+            Out-Host
+    }
+
+
+    # ============================================================
+    # Resumo por pasta
+    # ============================================================
+
+    $comPasta = $registros |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_.PastaResumo) } |
+        Select-Object -First 1
+
+    if ($comPasta) {
+
+        Write-Host ''
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' RESUMO POR PASTA' -ForegroundColor Cyan
+        Write-Host '============================================================' -ForegroundColor DarkGray
+
+        $registros |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_.PastaResumo) } |
+            Group-Object PastaResumo |
+            ForEach-Object {
+
+                [PSCustomObject]@{
+                    Pasta        = $_.Name
+                    Usuarios     = @($_.Group | Select-Object -ExpandProperty Usuario -Unique).Count
+                    Acessos      = ($_.Group | Measure-Object Ocorrencias -Sum).Sum
+                    Falhas       = [int](
+                        ($_.Group | Where-Object { $_.Resultado -eq 'Falha' } |
+                            Measure-Object Ocorrencias -Sum).Sum
+                    )
+                    UltimoAcesso = ($_.Group | Measure-Object DataHora -Maximum).Maximum
+                }
+            } |
+            Sort-Object Acessos -Descending |
+            Format-Table -AutoSize |
+            Out-Host
+    }
+
+    # Compartilhamentos listados (-ListarCompartilhamentos) sem nenhum acesso
+    if ($ListarCompartilhamentos -and $listaShares.Count -gt 0 -and $EventoId -ne 4663) {
+
+        $semAcesso = @(
+            foreach ($sh in $listaShares) {
+
+                $teve = $registros |
+                    Where-Object {
+                        ($_.Servidor -ieq $sh.Servidor -or $_.Servidor -like "$($sh.Servidor).*") -and
+                        (([string]$_.Compartilhamento) -replace '^.*\\', '') -ieq $sh.Nome
+                    } |
+                    Select-Object -First 1
+
+                if (-not $teve) {
+                    $sh
+                }
+            }
+        )
+
+        if ($semAcesso.Count -gt 0) {
+
+            Write-Host ''
+            Write-Host 'Compartilhamentos SEM acessos no período (considerando os filtros aplicados):' -ForegroundColor Yellow
+
+            $semAcesso |
+                Format-Table Servidor, Nome, Caminho -AutoSize |
+                Out-Host
+        }
+    }
+
+
+    # ============================================================
+    # Alertas: permissões amplas e acessos não autorizados
+    # ============================================================
+
+    $liberadosAmplo = @($registros | Where-Object { $_.PermissaoAmpla -eq 'Sim' })
+
+    if ($liberadosAmplo.Count -gt 0) {
+
+        Write-Host ''
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' PERMISSÕES AMPLAS DETECTADAS' -ForegroundColor Yellow
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host 'ACEs de permissão amplas identificadas no AccessReason (não identifica quem configurou a ACL):'
+
+        $liberadosAmplo |
+            Group-Object PastaResumo, ConcedidoPor |
+            ForEach-Object {
+
+                [PSCustomObject]@{
+                    Pasta        = $_.Group[0].PastaResumo
+                    ConcedidoPor = $_.Group[0].ConcedidoPor
+                    Usuarios     = @($_.Group | Select-Object -ExpandProperty Usuario -Unique).Count
+                    Acessos      = ($_.Group | Measure-Object Ocorrencias -Sum).Sum
+                }
+            } |
+            Sort-Object Acessos -Descending |
+            Format-Table -AutoSize -Wrap |
+            Out-Host
+    }
+
+    $naoAutorizados = @($registros | Where-Object { $_.Autorizacao -eq 'NAO AUTORIZADO' })
+
+    if ($naoAutorizados.Count -gt 0) {
+
+        Write-Host ''
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' ACESSOS NAO AUTORIZADOS (conforme -ListaAutorizados)' -ForegroundColor Red
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host 'NAO AUTORIZADO indica divergência da regra de negócio. 5145: verificação SMB; 4663: operação auditada; 5140: conexão. Êxito no 5145 não comprova leitura do conteúdo.'
+
+        $naoAutorizados |
+            Group-Object Usuario, PastaResumo, Resultado |
+            ForEach-Object {
+
+                [PSCustomObject]@{
+                    Usuario      = $_.Group[0].Usuario
+                    Departamento = $_.Group[0].Departamento
+                    Pasta        = $_.Group[0].PastaResumo
+                    Resultado    = $_.Group[0].Resultado
+                    Acessos      = ($_.Group | Measure-Object Ocorrencias -Sum).Sum
+                    UltimoAcesso = ($_.Group | Measure-Object DataHora -Maximum).Maximum
+                }
+            } |
+            Sort-Object Resultado, Acessos -Descending |
+            Format-Table -AutoSize -Wrap |
+            Out-Host
+    }
+
+
+    # ============================================================
+    # Detalhamento (colunas essenciais; o CSV traz todas)
+    # ============================================================
+
+    Write-Host ''
+    Write-Host '============================================================' -ForegroundColor DarkGray
+    Write-Host ' DETALHAMENTO' -ForegroundColor Cyan
+    Write-Host '============================================================' -ForegroundColor DarkGray
+
+    $colunas = @('DataHora')
+
+    if ($Computador.Count -gt 1) {
+        $colunas += 'Servidor'
+    }
+
+    $colunas += 'Usuario', 'Resultado', 'IP'
+
+    if ($ResolverIP) {
+        $colunas += 'Estacao'
+    }
+
+    $colunas += 'Acesso', 'Objeto'
+
+    if ($regrasAutorizacao.Count -gt 0) {
+        $colunas += 'Autorizacao'
+    }
+
+    if (@($registros | Where-Object { $_.PermissaoAmpla -eq 'Sim' }).Count -gt 0) {
+        $colunas += 'PermissaoAmpla'
+    }
+
+    $colunas += 'Ocorrencias'
+
+    $registros |
+        Select-Object -Property $colunas |
+        Format-Table -AutoSize -Wrap |
+        Out-Host
+}
+
+
+# ============================================================
+# Exportação CSV
+# ============================================================
+
+if (-not [string]::IsNullOrWhiteSpace($CsvSaida)) {
+
+    try {
+
+        $diretorio = Split-Path -Path $CsvSaida -Parent
+
+        if (
+            -not [string]::IsNullOrWhiteSpace($diretorio) -and
+            -not (Test-Path $diretorio)
+        ) {
+
+            New-Item -Path $diretorio -ItemType Directory -Force | Out-Null
+        }
+
+        $registros |
+            ForEach-Object {
+
+                [PSCustomObject]@{
+                    DataHora         = $_.DataHora.ToString('yyyy-MM-dd HH:mm:ss')
+                    PrimeiroAcesso   = $_.PrimeiroAcesso.ToString('yyyy-MM-dd HH:mm:ss')
+                    UltimoAcesso     = $_.UltimoAcesso.ToString('yyyy-MM-dd HH:mm:ss')
+                    Servidor         = Protect-CsvCell $_.Servidor
+                    RecordId         = $_.RecordId
+                    Usuario          = Protect-CsvCell $_.Usuario
+                    Resultado        = $_.Resultado
+                    IP               = Protect-CsvCell $_.IP
+                    Porta            = $_.Porta
+                    Acesso           = Protect-CsvCell $_.Acesso
+                    AccessList       = Protect-CsvCell $_.AccessList
+                    AccessMask       = $_.AccessMask
+                    Objeto           = Protect-CsvCell $_.Objeto
+                    Compartilhamento = Protect-CsvCell $_.Compartilhamento
+                    CaminhoRelativo  = Protect-CsvCell $_.CaminhoRelativo
+                    CaminhoLocal     = Protect-CsvCell $_.CaminhoLocal
+                    Processo         = Protect-CsvCell $_.Processo
+                    ProcessId        = $_.ProcessId
+                    HandleId         = $_.HandleId
+                    LogonId          = $_.LogonId
+                    EventoId         = $_.EventoId
+                    Ocorrencias      = $_.Ocorrencias
+                    UsuarioSid       = $_.UsuarioSid
+                    TipoObjeto       = Protect-CsvCell $_.TipoObjeto
+                    AccessReason     = Protect-CsvCell $_.AccessReason
+                    ConcedidoPor     = Protect-CsvCell $_.ConcedidoPor
+                    PermissaoAmpla   = $_.PermissaoAmpla
+                    PastaResumo      = Protect-CsvCell $_.PastaResumo
+                    Estacao          = Protect-CsvCell $_.Estacao
+                    Departamento     = Protect-CsvCell $_.Departamento
+                    Cargo            = Protect-CsvCell $_.Cargo
+                    Autorizacao      = $_.Autorizacao
+                    NaturezaEvento   = $_.NaturezaEvento
+                }
+            } |
+            Export-Csv `
+                -Path $CsvSaida `
+                -NoTypeInformation `
+                -Encoding UTF8 `
+                -Delimiter ';'
+
+        Write-Host ''
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' EXPORTAÇÃO CONCLUÍDA' -ForegroundColor Green
+        Write-Host '============================================================' -ForegroundColor DarkGray
+
+        Write-Host "Arquivo: $CsvSaida" -ForegroundColor Green
+        Write-Host "Linhas exportadas: $($registros.Count)"
+
+    }
+    catch {
+
+        Write-Error "Falha ao exportar CSV: $($_.Exception.Message)"
+    }
+}
+
+
+# ============================================================
+# Exportação CSV consolidado (usuário x pasta)
+# ============================================================
+
+if (-not [string]::IsNullOrWhiteSpace($CsvResumo)) {
+
+    try {
+
+        $diretorioResumo = Split-Path -Path $CsvResumo -Parent
+
+        if (
+            -not [string]::IsNullOrWhiteSpace($diretorioResumo) -and
+            -not (Test-Path $diretorioResumo)
+        ) {
+
+            New-Item -Path $diretorioResumo -ItemType Directory -Force | Out-Null
+        }
+
+        $linhasResumo = @(
+            $registros |
+            Group-Object Servidor, UsuarioSid, Usuario, PastaResumo |
+            ForEach-Object {
+
+                $g = $_.Group
+
+                $razoes = @(
+                    $g.ConcedidoPor |
+                        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                        ForEach-Object { $_ -split '; ' } |
+                        Sort-Object -Unique
+                )
+
+                if (@($g | Where-Object { $_.PermissaoAmpla -eq 'Sim' }).Count -gt 0) {
+                    $ampla = 'Sim'
+                }
+                elseif (@($g | Where-Object { $_.PermissaoAmpla -eq 'Nao' }).Count -gt 0) {
+                    $ampla = 'Nao'
+                }
+                else {
+                    $ampla = ''
+                }
+
+                if (@($g | Where-Object { $_.Autorizacao -eq 'NAO AUTORIZADO' }).Count -gt 0) {
+                    $autorizacao = 'NAO AUTORIZADO'
+                }
+                elseif (@($g | Where-Object { $_.Autorizacao -eq 'Indeterminado' }).Count -gt 0) {
+                    $autorizacao = 'Indeterminado'
+                }
+                else {
+                    $autorizacao = (($g.Autorizacao | Sort-Object -Unique) -join '; ')
+                }
+
+                [PSCustomObject]@{
+                    Servidor       = Protect-CsvCell $g[0].Servidor
+                    UsuarioSid     = $g[0].UsuarioSid
+                    Usuario        = Protect-CsvCell $g[0].Usuario
+                    Departamento   = Protect-CsvCell $g[0].Departamento
+                    Pasta          = Protect-CsvCell $g[0].PastaResumo
+                    Acessos        = ($g | Measure-Object Ocorrencias -Sum).Sum
+                    Falhas         = [int](
+                        ($g | Where-Object { $_.Resultado -eq 'Falha' } |
+                            Measure-Object Ocorrencias -Sum).Sum
+                    )
+                    PrimeiroAcesso = (($g | Measure-Object PrimeiroAcesso -Minimum).Minimum).ToString('yyyy-MM-dd HH:mm:ss')
+                    UltimoAcesso   = (($g | Measure-Object UltimoAcesso -Maximum).Maximum).ToString('yyyy-MM-dd HH:mm:ss')
+                    ConcedidoPor   = Protect-CsvCell ($razoes -join '; ')
+                    PermissaoAmpla = $ampla
+                    Autorizacao    = $autorizacao
+                }
+            }
+        )
+
+        $linhasResumo |
+            Sort-Object { [int]$_.Acessos } -Descending |
+            Export-Csv `
+                -Path $CsvResumo `
+                -NoTypeInformation `
+                -Encoding UTF8 `
+                -Delimiter ';'
+
+        Write-Host ''
+        Write-Host "Resumo usuário x pasta: $CsvResumo ($($linhasResumo.Count) linha(s))" -ForegroundColor Green
+    }
+    catch {
+
+        Write-Error "Falha ao exportar o CSV de resumo: $($_.Exception.Message)"
+    }
+}
+
+
+# ============================================================
+# Avisos finais
+# ============================================================
+
+if ($servidoresSemEventos.Count -gt 0) {
+
+    Write-Host ''
+    Write-Host "Sem eventos do tipo $EventoId no período em: $($servidoresSemEventos -join ', ')" -ForegroundColor DarkYellow
+}
+
+if ($servidoresComErro.Count -gt 0) {
+
+    Write-Host ''
+    Write-Warning "Não foi possível ler o log de: $($servidoresComErro -join ', '). O relatório está incompleto."
+}
+
+if ($ignoradosRuido -gt 0) {
+
+    Write-Host ''
+    Write-Host "$ignoradosRuido evento(s) de atributos/permissões foram descartados (-IgnorarAtributos)." -ForegroundColor DarkYellow
+}
+
+if ($ignoradosEspeciais -gt 0) {
+
+    Write-Host ''
+    Write-Host "$ignoradosEspeciais evento(s) de compartilhamentos administrativos (IPC$, ADMIN$, C$...) foram descartados (use -IncluirCompartilhamentosEspeciais para incluí-los)." -ForegroundColor DarkYellow
+}
+
+if ($ignoradosExcluidos -gt 0) {
+
+    Write-Host ''
+    Write-Host "$ignoradosExcluidos evento(s) foram descartados por -ExcluirUsuarios." -ForegroundColor DarkYellow
+}
+
+if ($falhasParse -gt 0) {
+
+    Write-Host ''
+    Write-Warning "$falhasParse evento(s) não puderam ser processados e ficaram fora do relatório (use -Verbose para detalhes)."
+}
+
+
+# ============================================================
+# Saída interativa / pipeline
+# ============================================================
+
+if ($GridView) {
+
+    if (Get-Command Out-GridView -ErrorAction SilentlyContinue) {
+
+        $registros |
+            Out-GridView -Title 'Relatório de acessos' -Wait
+    }
+    else {
+
+        Write-Warning 'Out-GridView não está disponível neste ambiente; -GridView foi ignorado.'
+    }
+}
+
+if ($PassThru) {
+
+    $registros
+}
