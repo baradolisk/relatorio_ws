@@ -194,3 +194,9 @@ REORGANIZAÇÃO DO REPOSITÓRIO
 - Os corpos executáveis e parâmetros dos relatórios foram preservados;
   somente os exemplos em comentários de ajuda dos scripts atuais mudaram.
 - As referências de entregas anteriores neste histórico usam os nomes da época.
+
+TEXTOS MAIS DIRETOS
+- README com início rápido; exemplos avançados em docs/EXEMPLOS.md.
+- Guias de auditoria e erros, contribuição e ajuda dos scripts encurtados.
+- Mensagens antigas sobre acesso indevido e grupos amplos esclarecidas.
+- Parâmetros e processamento preservados. 23 verificações locais aprovadas.

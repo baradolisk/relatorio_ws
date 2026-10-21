@@ -1,114 +1,68 @@
-# Solução de problemas
+# Resolver problemas
 
-Os exemplos de execução pressupõem a raiz do repositório como diretório atual.
+Execute os exemplos na pasta principal do repositório.
 
-## Script não assinado / execução bloqueada
+## Script bloqueado
 
-Inspecione a política:
+Confira a política e, após verificar a origem do arquivo, remova a marca de download:
 
 ```powershell
 Get-ExecutionPolicy -List
-```
-
-Após conferir a origem do arquivo, remova a marca de download:
-
-```powershell
 Unblock-File -LiteralPath .\scripts\acessos\Relatorio-AcessoPasta.ps1
 ```
 
-Se MachinePolicy e UserPolicy estiverem Undefined e a política da empresa
-permitir, é possível usar apenas na sessão atual:
+Se MachinePolicy e UserPolicy forem Undefined e a empresa permitir, libere scripts locais apenas nesta sessão:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 ```
 
-Uma GPO AllSigned exige assinatura por certificado confiável. Não é resolvida
-com Unblock-File; siga o processo de assinatura do administrador do domínio.
+Se uma GPO exigir AllSigned, solicite a assinatura do script com certificado confiável. Desbloquear o download não substitui a assinatura.
 
-## “Não é possível localizar um parâmetro posicional … usuario”
+## Erro com o nome do usuário
 
-O nome pertence a Usuario; UsuarioExato é um switch:
+Use Usuario para o nome. UsuarioExato é uma opção sem texto:
 
 ```powershell
 .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Usuario "usuario.teste" -UsuarioExato -Dias 1
 ```
 
-Para evitar erros de continuação de linha, use splatting:
+Se não encontrar o usuário, retire UsuarioExato e tente `-Usuario "*teste*"`.
+
+## Nenhum resultado
+
+1. Faça um acesso pela rede a partir de outra estação.
+2. Consulte um período curto, sem Pasta ou Usuario.
+3. Confira [auditoria e tipos de evento](AUDITORIA-WINDOWS.md).
 
 ```powershell
-$opcoes = @{Usuario='usuario.teste'; UsuarioExato=$true; Dias=1}
-.\scripts\acessos\Relatorio-AcessoPasta.ps1 @opcoes
+Get-WinEvent -FilterHashtable @{
+    LogName = 'Security'
+    Id = 5145
+    StartTime = (Get-Date).AddMinutes(-15)
+} -MaxEvents 5 | Select-Object TimeCreated, Id, Message
 ```
 
-UsuarioExato diferencia caixa no log. Para investigar grafia/domínio, remova a
-opção e use Usuario com o nome ou um padrão, por exemplo `*teste*`.
+Sem 5145, confira Detailed File Share. Para 4663, confira também auditoria na pasta (SACL). Leia os erros: acesso negado não significa zero eventos. Confira o servidor e o período; eventos antigos podem ter sido perdidos.
 
-## Sem eventos ou sem resultados
+## Caminho local funciona, nome de rede não
 
-No servidor, verifique cada tipo separadamente:
+Confira os nomes com `Get-SmbShare | Select-Object Name, Path`. Se `z` aponta para `E:\FileServer`, use `\\SERVIDOR\z`.
 
-```powershell
-foreach ($id in 5145, 4663, 5140) {
-    $ev = @(Get-WinEvent -FilterHashtable @{
-        LogName='Security'; Id=$id; StartTime=(Get-Date).AddDays(-1)
-    } -MaxEvents 5 -ErrorAction Continue)
-    [pscustomobject]@{Evento=$id; Amostra=$ev.Count; MaisRecente=($ev | Select-Object -First 1).TimeCreated}
-}
-```
+O original corrigido trata nomes curtos e completos do servidor. Na v8, use o nome mostrado no CSV; para 4663, use caminho local. Nomes alternativos e DFS não são traduzidos automaticamente.
 
-Amostra é limitada a 5; não representa o total. Leia erros: falha de acesso não
-é equivalente a zero eventos. Se só existir 5140, confira a política Detailed
-File Share para 5145. Para 4663, confira também SACL. Remova temporariamente
-filtros de pasta e usuário, faça um acesso controlado por rede e consulte os
-últimos 15 minutos. O período do relatório precisa incluir a data do teste.
+## Demora depois de “Consultando log”
 
-## Caminho absoluto funciona, nome de rede não
+Se o prompt não voltou, a consulta pode continuar ativa. Interrompa com Ctrl+C e tente 15 minutos. Evite ResolverIP e EnriquecerAD no primeiro teste. Silencioso apenas oculta tabelas; não reduz o trabalho.
 
-Confirme o nome real em Get-SmbShare. O Windows pode gravar `\\*\z` em vez
-de `\\SERVIDOR\z`. A correção do original normaliza esse nome e trata nomes
-curtos/FQDN do servidor. Use o original atualizado e o servidor correto em
-Computador. No v8, use o caminho resultante no CSV ou caminho local para 4663;
-a correção UNC mais recente não foi portada integralmente para a v8.
+## Falha remota ou relatório incompleto
 
-Aliases, nomes DFS e caminhos locais não são intercambiáveis automaticamente.
-Não presuma que o nome da pasta no disco seja o nome do compartilhamento.
+- Teste primeiro no servidor local, com acesso ao log de Segurança.
+- Log remoto depende de permissões e RPC/firewall; inventário usa CIM e leitura de pastas usa SMB. Não desative o firewall inteiro.
+- Confira avisos e o CSV de cobertura da v8 ou do inventário v2.
+- Confira a data do CSV: quando não há registros, o detalhado pode não ser criado e um arquivo antigo continuar na pasta.
+- Indeterminado significa que faltam dados para concluir a autorização.
 
-## Parou depois de “Consultando log de Segurança”
+## Arquivos arquivados não aparecem
 
-Se o prompt não voltou, pode continuar processando. A consulta pode examinar
-muitos eventos antes de aplicar o filtro de pasta. Diminua a janela para 15
-minutos; evite DNS reverso e enriquecimento AD no primeiro diagnóstico.
-Silencioso oculta tabelas, não reduz a quantidade de eventos consultados.
-Se necessário, interrompa com Ctrl+C e execute novamente com janela menor.
-
-Os registros são mantidos em memória. Agrupar reduz linhas, mas consolida
-registros; para preservar evidência detalhada, prefira janelas menores.
-
-## Acesso remoto falhou
-
-Confira permissões do log e conectividade RPC/firewall de gerenciamento remoto
-de eventos. O inventário SMB usa CIM, com requisitos adicionais; leitura de
-ACL usa UNC/SMB. Sucesso em uma operação não comprova acesso às outras.
-Teste localmente no servidor primeiro. Não desative o firewall inteiro.
-
-## CSV vazio, arquivo antigo ou relatório incompleto
-
-Confira avisos de exportação, caminho de saída, data de modificação e se o
-resultado pertence à execução atual. Nas versões atuais, zero registros pode
-retornar antes da criação de um novo CSV detalhado; um arquivo antigo não prova
-sucesso. Use nomes com {data}. Na v8, confira também `.cobertura.csv`, mesmo
-quando não houver eventos. No inventário v2, confira erros de ACL/enumeração/SID.
-
-## Permissões amplas e não autorizados
-
-Permissão ampla é indício para revisão, não prova de acesso indevido. O original
-usa classificação anterior por nome/trecho; para comparar com regras de negócio,
-prefira v8 e caminhos completos. Indeterminado significa consulta insuficiente,
-não autorização nem acusação. Associações AD atuais não provam o estado histórico.
-
-## Arquivo EVTX arquivado não aparece
-
-O script consulta Security ativo. Veja as limitações de arquivamento em
-[AUDITORIA-WINDOWS.md](AUDITORIA-WINDOWS.md); não há opção de arquivo EVTX nos
-parâmetros atuais.
+Os relatórios consultam apenas o log ativo. Veja [arquivamento](AUDITORIA-WINDOWS.md#arquivar-ao-atingir-o-limite).

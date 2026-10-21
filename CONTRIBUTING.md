@@ -1,46 +1,20 @@
-# Contribuir
+# Como contribuir
 
-Abra uma issue descrevendo o problema, versão do script, versão do PowerShell,
-comando usado e resultado esperado. Remova nomes reais, IPs, caminhos, SIDs e
-qualquer dado sensível antes de anexar amostras. Não envie logs de Segurança
-completos, relatórios de produção ou credenciais ao repositório.
+Abra uma issue com o script usado, versão do PowerShell, comando, erro e resultado esperado. Remova usuários, IPs e caminhos reais das amostras. Não publique credenciais ou logs de produção.
 
-Para propor alterações, crie uma branch, mantenha compatibilidade com Windows
-PowerShell 5.1 e envie um pull request com descrição e validação. Preserve UTF-8
-com BOM nos scripts destinados ao 5.1. Não altere ACLs, GPO ou auditoria como
-parte implícita da execução dos relatórios.
+Para propor uma correção:
 
-## Validação local
-
-Na raiz do checkout, com PowerShell:
+1. Crie uma branch e altere a versão correta: original, v8 ou permissões v2.
+2. Mantenha compatibilidade com PowerShell 5.1 e UTF-8 com BOM nos scripts.
+3. Atualize exemplos, documentação e testes afetados.
+4. Execute na raiz:
 
 ```powershell
 pwsh -NoProfile -File .\tests\Test-Relatorios.ps1
 ```
 
-O teste valida sintaxe e funções isoladas com dados simulados. Não executa os
-relatórios contra logs, AD ou SMB de produção; não muda auditoria nem ACLs.
-A integração contínua executa o mesmo comando em Linux com PowerShell 7.
-Isso não comprova execução em Windows Server ou Windows PowerShell 5.1.
+5. Abra um pull request descrevendo a mudança e o que foi testado.
 
-Para mudanças na coleta, valide também em Windows de teste: usuário permitido,
-usuário fora da regra, tentativa bloqueada, grupo indisponível e leitura negada.
-Confira quantidade de eventos, filtros, CSV e cobertura; registre versão do
-PowerShell e quais testes usaram fontes reais ou simuladas. Zero eventos não
-é um teste funcional aprovado.
+Os testes usam funções isoladas e dados simulados no PowerShell 7. Mudanças na coleta também precisam de teste em Windows, com log, AD e SMB reais. Zero eventos não comprova funcionamento.
 
-Evite misturar as versões durante uma correção: declare no PR se a alteração
-é do original, v8 ou inventário v2. Veja as diferenças no README. Caso mude
-parâmetros ou interpretação dos resultados, atualize a documentação e os testes.
-
-## Organização dos arquivos
-
-- `scripts/acessos/`: relatórios de eventos, original corrigido e v8.
-- `scripts/permissoes/`: inventário de permissões v2.
-- `legacy/permissoes/`: implementação anterior, preservada para referência.
-- `examples/`: modelos sem dados reais; saídas de relatórios não pertencem aqui.
-- `docs/`: guias e histórico; `tests/`: validações isoladas.
-
-Ao mover ou renomear um script, ajuste testes, exemplos da ajuda e documentação.
-Evite duplicar implementações na raiz para manter compatibilidade de caminhos;
-documente a migração dos comandos e das tarefas agendadas.
+Mantenha relatórios em `scripts/`, modelos em `examples/`, guias em `docs/` e testes em `tests/`. Versões anteriores ficam em `legacy/`. Ao mover arquivos, ajuste caminhos e informe a migração. A execução dos relatórios deve continuar apenas consultando dados, sem alterar auditoria ou permissões.

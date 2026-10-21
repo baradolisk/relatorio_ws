@@ -1,236 +1,101 @@
 ﻿#requires -Version 5.1
+
 <#
 .SYNOPSIS
-    Gera relatório de acessos a pastas/arquivos compartilhados
-    a partir do log de Segurança do Windows Server.
+    Consulta acessos a pastas e exporta relatórios CSV.
 
 .DESCRIPTION
-    Versão revisada v8. Use -CsvCobertura para cobertura por servidor;
-    com -CsvSaida, o arquivo de cobertura é criado automaticamente.
-    -ServidorAD seleciona o controlador/domínio para consultas AD.
-    Regras Pasta;Grupo exigem caminho completo UNC ou local (sem curingas).
-    Sem -Computador, consulta apenas o computador local; informe todos os
-    servidores de arquivos. Não há descoberta automática do domínio.
-    Membros AD refletem a coleta atual, não a data histórica do evento.
-    Resumos usam a raiz do compartilhamento, sem deduzir tipo pelo nome.
+    Execute no Windows com acesso aos dados consultados. Exemplos partem da raiz do repositório.
+    5145: verificação SMB; não comprova leitura do conteúdo.
+    5140: conexão ao compartilhamento. 4663: direito auditado no objeto; exige SACL.
+    Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
-    Consulta eventos de auditoria do Windows (em um ou vários servidores)
-    e exibe informações como:
+.PARAMETER ServidorAD
+    Servidor ou domínio usado na consulta inicial ao Active Directory.
 
-      - Data e hora
-      - Servidor de origem
-      - Usuário (domínio\usuário)
-      - Resultado (Êxito/Falha)
-      - IP e porta de origem
-      - Arquivo/pasta acessado (caminho de rede e caminho local)
-      - Tipo de acesso, AccessList e AccessMask original
-      - Logon ID
-      - Processo, ProcessId e HandleId relacionados (4663)
-      - ID e RecordId do evento
-      - Quem liberou o acesso (AccessReason do 5145, com SIDs resolvidos) e
-        se a liberação veio de um grupo amplo (Everyone, Domain Users...)
-      - Estação (DNS), departamento/cargo (AD) e status de autorização
-        (comparação com uma lista de autorizados), quando solicitados
-
-    Eventos suportados:
-
-      4663 - Acesso efetivo a arquivo/pasta.
-             Exige auditoria configurada na pasta/arquivo via SACL.
-             Não traz IP (use o LogonId para cruzar com 5145/5140).
-
-      5145 - Verificação detalhada de acesso através de compartilhamento SMB.
-             Recomendado para identificar: usuário + IP + arquivo/pasta.
-
-      5140 - Conexão a um compartilhamento de rede.
-             Não identifica necessariamente cada arquivo acessado.
-
-    Execute como Administrador no servidor de arquivos.
+.PARAMETER CsvCobertura
+    Arquivo de cobertura. Com CsvSaida, é gerado automaticamente se omitido.
 
 .PARAMETER Pasta
-    Trecho do caminho, pasta, arquivo ou compartilhamento a filtrar.
-    OPCIONAL: se omitido, o relatório cobre todos os compartilhamentos
-    (exceto IPC$, ADMIN$ e unidades administrativas como C$, salvo se usar
-    -IncluirCompartilhamentosEspeciais).
-    Caracteres especiais como [ ] são tratados literalmente.
-
-    O filtro é comparado com o caminho de rede (\\...\Share\sub\arquivo) e
-    com o caminho local completo (D:\Dados\Financeiro\sub\arquivo), então
-    ambos funcionam. O nome do processo (4663) NÃO entra no filtro.
-
-    Exemplos:
-        Financeiro
-        Financeiro\Pagamentos
-        D:\Dados\Financeiro\Pagamentos
-        relatorio.xlsx
-        "Projeto [2026]"
+    Nome, trecho ou caminho da pasta. Omita para pesquisar todas.
 
 .PARAMETER Dias
-    Quantos dias para trás consultar. Padrão: 1
-    (Não pode ser usado junto com -Inicio/-Fim.)
+    Dias anteriores a consultar. Padrão: 1. Não combine com Inicio/Fim.
 
 .PARAMETER Inicio
-    Início do período a consultar (ex.: "2026-10-19 08:00").
-    Use no lugar de -Dias para investigar uma janela específica.
+    Data e hora inicial de um período específico.
 
 .PARAMETER Fim
-    Fim do período (usado com -Inicio). Se omitido, vai até agora.
+    Data e hora final. Com Inicio, o padrão é até agora.
 
 .PARAMETER EventoId
-    Evento de segurança a consultar: 4663, 5145 ou 5140. Padrão: 5145
+    Um evento por execução: 5145 (padrão), 5140 ou 4663.
 
 .PARAMETER Usuario
-    Filtro opcional por usuário. Aceita curingas (joao, joao*, *silva*).
-    Se o filtro contiver "\" (ex.: "EMPRESA\joao*"), a comparação é feita
-    com DOMINIO\usuario; caso contrário, apenas com o nome do usuário.
-    Padrão: *
+    Nome ou padrão do usuário. Exemplo: "joao*". Padrão: todos.
 
 .PARAMETER UsuarioExato
-    Quando o -Usuario não tem curingas, aspas nem "\", aplica o filtro já
-    na consulta ao log (bem mais rápido em logs grandes). Atenção: nesse
-    modo a comparação diferencia maiúsculas de minúsculas, então digite o
-    usuário exatamente como aparece no log.
+    Otimiza a busca pelo nome exato; diferencia maiúsculas/minúsculas. Não recebe texto.
 
 .PARAMETER Computador
-    Um ou mais servidores de arquivos (ex.: "SRV1","SRV2").
-    Padrão: computador local.
+    Servidores a consultar. Padrão: computador local.
 
 .PARAMETER IgnorarAtributos
-    Descarta eventos cujo acesso é apenas "ruído": ler atributos, ler
-    permissões, atravessar pasta e sincronizar. Máscaras com bits
-    desconhecidos NUNCA são descartadas.
+    Descarta eventos que contêm apenas direitos considerados ruído.
 
 .PARAMETER Agrupar
-    Agrupa eventos repetidos dentro do mesmo minuto em uma única linha
-    (mesmo servidor, usuário, LogonId, IP, porta, objeto, AccessMask,
-    processo e resultado). A coluna Ocorrencias informa quantos eventos foram
-    consolidados. PrimeiroAcesso e UltimoAcesso preservam a janela do grupo;
-    RecordId e DataHora permanecem referentes ao evento mais recente.
-    O agrupamento é feito durante a leitura, o que economiza memória.
+    Reúne eventos semelhantes no mesmo minuto. Use sem esta opção para preservar cada evento.
 
 .PARAMETER Resultado
-    Filtra o resultado da auditoria: Todos, Exito ou Falha.
-    Padrão: Todos. Para 4663, normalmente só existem eventos de êxito.
-    O filtro é aplicado já na consulta ao log (palavra-chave de auditoria).
+    Todos (padrão), Exito ou Falha.
 
 .PARAMETER IncluirContasComputador
-    Por padrão, contas terminadas em $ (ex.: SERVIDOR$) são ignoradas.
-    Use esta opção para incluí-las no relatório.
+    Inclui contas com nome terminado em $, ignoradas por padrão.
 
 .PARAMETER CsvSaida
-    Caminho opcional para exportar o relatório completo em CSV
-    (separador ";", UTF-8). Datas saem como yyyy-MM-dd HH:mm:ss e textos
-    iniciados por = + - @ ganham um apóstrofo para não virarem fórmula
-    no Excel. Aceita o token {data}, substituído por yyyyMMdd-HHmmss
-    (útil em execuções agendadas: "C:\Relatorios\acessos-{data}.csv").
+    Arquivo CSV detalhado. Aceita {data} no nome.
 
 .PARAMETER ExcluirUsuarios
-    Um ou mais usuários/contas de serviço a ignorar (curingas aceitos), por
-    exemplo antivírus e backup: -ExcluirUsuarios "svc-backup","svc-av*".
-    A comparação é feita com o nome do usuário e com DOMINIO\usuario.
+    Contas a ignorar. Exemplo: "svc-*","backup".
 
 .PARAMETER IncluirCompartilhamentosEspeciais
-    Por padrão, IPC$, ADMIN$, print$ e compartilhamentos de unidade (C$, D$...)
-    são ignorados nos eventos 5145/5140 (geram muito ruído). Use esta opção
-    para incluí-los.
+    Inclui compartilhamentos como C$, E$ e ADMIN$.
 
 .PARAMETER ListarCompartilhamentos
-    Lista os compartilhamentos (não administrativos) de cada servidor via
-    Get-SmbShare e, no fim, mostra quais não tiveram acessos no período
-    (considerando os filtros aplicados). Não vale para o evento 4663.
+    Lista os compartilhamentos dos servidores informados.
 
 .PARAMETER ListaAutorizados
-    CSV (separador ";") com as colunas Pasta;Grupo (caminhos completos). Cada linha diz que os
-    membros (recursivo) do grupo do AD podem acessar o caminho exato de "Pasta" ou seus descendentes. Vale a regra mais específica (maior texto). A coluna
-    Autorizacao passa a ter: Autorizado, NAO AUTORIZADO, Sem regra ou
-    Indeterminado (grupo não lido). NAO AUTORIZADO é divergência da regra de negócio; 5145 não comprova leitura
-    de conteúdo. A associação AD é consultada no momento da execução. Requer o módulo ActiveDirectory (RSAT).
-    Veja examples/ListaAutorizados-exemplo.csv, a partir da raiz do repositório.
+    CSV Pasta;Grupo com caminhos completos, sem curingas. Requer ActiveDirectory/RSAT.
 
 .PARAMETER EnriquecerAD
-    Preenche Departamento e Cargo de cada usuário (módulo ActiveDirectory).
+    Acrescenta departamento e cargo. Requer ActiveDirectory/RSAT.
 
 .PARAMETER ResolverIP
-    Preenche a coluna Estacao com o nome DNS reverso do IP (com cache).
-    Pode ser lento se o DNS reverso não estiver bem configurado.
+    Busca o nome DNS da estação pelo IP. Pode tornar a consulta lenta.
 
 .PARAMETER CsvResumo
-    Exporta um CSV consolidado "usuário x pasta" (Acessos, Falhas, primeiro e
-    último acesso, quem liberou, grupo amplo, autorização), pronto para tabela
-    dinâmica. Aceita o token {data}.
+    Arquivo CSV de resumo por usuário e pasta. Aceita {data}.
 
 .PARAMETER Silencioso
-    Não imprime os resumos e o detalhamento no console (útil em tarefas
-    agendadas); avisos, CSV e contagens continuam.
+    Oculta tabelas; avisos e mensagens de execução continuam.
 
 .PARAMETER GridView
-    Abre o resultado completo em Out-GridView (requer interface gráfica).
+    Abre os resultados em janela. Requer Out-GridView e interface gráfica.
 
 .PARAMETER PassThru
-    Devolve os registros como objetos no pipeline, para uso em outros scripts.
+    Retorna os registros como objetos PowerShell.
 
 .EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 7
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "RH" -Dias 1
 
 .EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 3 -IgnorarAtributos -Agrupar -CsvSaida "C:\Temp\acessos.csv"
-
-.EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "D:\Dados\RH\Folha" -Usuario "maria" -UsuarioExato -Dias 30 -EventoId 4663
-
-.EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Inicio "2026-10-19 08:00" -Fim "2026-10-19 18:00" -Computador "SRV-ARQ1","SRV-ARQ2"
-
-.EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 7 -Resultado Falha -CsvSaida "C:\Temp\falhas.csv"
-
-.EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Dados" -Dias 1 -IncluirContasComputador
-
-.EXAMPLE
-    # Todos os compartilhamentos, últimas 24h, sem contas de serviço
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Dias 1 -IgnorarAtributos -Agrupar -ExcluirUsuarios "svc-*" -CsvSaida "C:\Relatorios\acessos-{data}.csv" -CsvResumo "C:\Relatorios\resumo-{data}.csv"
-
-.EXAMPLE
-    # Cruza os acessos com a lista de autorizados e traz departamento/estação
-    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Dias 7 -Agrupar -ListaAutorizados "C:\Relatorios\autorizados.csv" -EnriquecerAD -ResolverIP -ListarCompartilhamentos -Computador "SRV-ARQ1","SRV-ARQ2"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -CsvSaida "C:\Relatorios\acessos-{data}.csv"
 
 .NOTES
-    Para o evento 4663:
-        habilite auditoria de File System e configure a SACL da pasta.
-
-    Para o evento 5145:
-        Advanced Audit Policy > Object Access > Audit Detailed File Share
-
-    Para o evento 5140:
-        Advanced Audit Policy > Object Access > Audit File Share
-
-    Observação sobre Resultado:
-        4663 representa acesso efetivamente realizado e normalmente é Êxito.
-        5145 pode registrar Êxito ou Falha na verificação do acesso SMB.
-        Nem toda Falha do 5145 indica tentativa indevida: clientes costumam
-        sondar arquivos que não existem (desktop.ini, thumbs.db etc.).
-
-    Salve este arquivo como UTF-8 com BOM para o Windows PowerShell 5.1
-    exibir corretamente os acentos.
-
-    Leitura de servidores remotos: a conta precisa pertencer ao grupo
-    "Leitores do log de eventos" (Event Log Readers) ou ser administradora, e
-    a regra de firewall "Gerenciamento Remoto de Log de Eventos" deve estar
-    ativa. O script avisa quando o log de Segurança começa depois do início
-    do período (eventos já sobrescritos); considere aumentar o tamanho do log
-    por GPO e agendar a execução diária com -CsvSaida "...-{data}.csv".
-
-    Sobre AccessReason/ConcedidoPor: só existe no evento 5145. Com -Agrupar,
-    a razão exibida é a do primeiro evento de cada grupo.
-
-    Histórico:
-      v7 - -Pasta passou a ser opcional; ignora IPC$/ADMIN$/C$ por padrão;
-           novas colunas (UsuarioSid, TipoObjeto, AccessReason, ConcedidoPor,
-           PermissaoAmpla, PastaResumo, Estacao, Departamento, Cargo,
-           Autorizacao); novos parâmetros -ExcluirUsuarios, -ListarCompartilhamentos,
-           -ListaAutorizados, -EnriquecerAD, -ResolverIP, -CsvResumo,
-           -Silencioso, -GridView, -PassThru. Colunas e comportamento
-           anteriores foram mantidos.
+    Veja README.md, docs/PARAMETROS.md e docs/EXEMPLOS.md para mais opções.
+    PowerShell 5.1 e Windows Server real ainda precisam de validação no seu ambiente.
+    Autorização por SID usa os grupos atuais, não a associação histórica.
+    Confira também o CSV de cobertura. Para 4663, prefira caminho local.
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Dias')]

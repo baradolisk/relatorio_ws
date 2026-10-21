@@ -1,39 +1,24 @@
-# Auditoria e retenção no Windows
+# Configurar auditoria e logs
 
-Execute comandos de configuração apenas no servidor de arquivos correto,
-como administrador, após aprovar o impacto de volume. Em domínio, configure
-pela GPO aplicada aos servidores; mudanças locais podem ser sobrescritas.
-Os exemplos abaixo alteram somente as opções explicitadas quando executados.
+Execute no servidor de arquivos, como administrador. Em domínio, mantenha a configuração na GPO dos servidores para evitar que uma mudança local seja sobrescrita.
 
-## Identificar os compartilhamentos
+## Registrar acessos pela rede — evento 5145
 
-```powershell
-Get-SmbShare | Select-Object Name, Path
-```
-
-Se `z` aponta para `E:\FileServer`, o caminho de rede é `\\SERVIDOR\z`,
-não necessariamente `\\SERVIDOR\FileServer`.
-
-## Conferir e habilitar o evento 5145
-
-Verificar Detailed File Share (GUID independente do idioma):
+Confira a configuração:
 
 ```powershell
 auditpol /get /subcategory:"{0CCE9244-69AE-11D9-BED3-505054503030}"
 ```
 
-Habilitar êxito e falha:
+Para habilitar êxito e falha:
 
 ```powershell
 auditpol /set /subcategory:"{0CCE9244-69AE-11D9-BED3-505054503030}" /success:enable /failure:enable
 ```
 
-Na GPO: Configuração do Computador → Políticas → Configurações do Windows →
-Configurações de Segurança → Configuração Avançada de Política de Auditoria →
-Políticas de Auditoria → Acesso a Objetos → Auditar Compartilhamento de Arquivos
-Detalhado. Habilite êxito e falha conforme sua política de auditoria.
+Na GPO: **Configuração do Computador → Políticas → Configurações do Windows → Configurações de Segurança → Configuração Avançada de Política de Auditoria → Políticas de Auditoria → Acesso a Objetos → Auditar Compartilhamento de Arquivos Detalhado**.
 
-Teste abrindo um arquivo por UNC, a partir de outra estação, e consulte:
+Depois, abra um arquivo por `\\SERVIDOR\Compartilhamento` em outra estação e consulte:
 
 ```powershell
 Get-WinEvent -FilterHashtable @{
@@ -43,23 +28,18 @@ Get-WinEvent -FilterHashtable @{
 } -MaxEvents 5 | Select-Object TimeCreated, Id, Message
 ```
 
-Um acesso local em `E:\FileServer` não substitui um teste via SMB. Eventos
-anteriores à habilitação não são criados retroativamente.
+A auditoria começa após habilitada; não cria registros retroativos.
 
-## Eventos 5140 e 4663
+## Outros eventos
 
-- 5140 depende de **Auditar Compartilhamento de Arquivos (File Share)** e
-  registra acesso ao compartilhamento, não cada operação em cada arquivo.
-- 4663 depende de **Auditar Sistema de Arquivos (File System)** e de uma SACL
-  na pasta/arquivo para os sujeitos e direitos desejados. Configure pela aba
-  Segurança → Avançado → Auditoria e valide herança/escopo em um piloto.
-  Apenas habilitar a política não basta.
-- Não trate êxito em 5145 como prova isolada de leitura: o evento representa
-  verificação de acesso SMB. Para 4663, interprete o direito em AccessMask.
+| Evento | Configuração necessária |
+| --- | --- |
+| 5140 | Auditar Compartilhamento de Arquivos (File Share); registra conexão ao compartilhamento |
+| 4663 | Auditar Sistema de Arquivos (File System) e SACL na pasta/arquivo para os usuários e direitos desejados |
 
-## Aumentar o log de Segurança para 2 GB
+Para a SACL, abra **Propriedades da pasta → Segurança → Avançado → Auditoria**. Confira herança e escopo num teste controlado. Habilitar só a política não basta.
 
-O comando altera o tamanho máximo; não limpa o log nem recupera registros:
+## Aumentar o log para 2 GB
 
 ```powershell
 wevtutil sl Security /ms:2147483648
@@ -68,52 +48,33 @@ Get-WinEvent -ListLog Security |
     Select-Object LogName, @{Name='MaximoMB';Expression={$_.MaximumSizeInBytes / 1MB}}, RecordCount
 ```
 
-Acompanhe o evento mais antigo:
+Não limpa o log nem recupera registros perdidos. A duração do histórico depende do volume de eventos. Confira espaço em disco e, se a configuração reverter, a GPO.
 
-```powershell
-Get-WinEvent -LogName Security -Oldest -MaxEvents 1 |
-    Select-Object TimeCreated, Id
-```
+## Arquivar ao atingir o limite
 
-Volume e espaço disponível determinam a retenção. Dois GB não garantem um
-número específico de dias. Verifique a GPO se o tamanho voltar ao anterior.
-
-## Arquivamento automático quando atingir o limite
-
-O Windows oferece esse recurso sem script em execução contínua:
+O Windows pode salvar o log cheio e iniciar outro automaticamente:
 
 ```powershell
 wevtutil sl Security /ms:2147483648 /rt:true /ab:true
 wevtutil gl Security
 ```
 
-Confira `retention: true`, `autoBackup: true` e `maxSize: 2147483648`.
-No caminho padrão, os arquivos são criados em:
+Confira `retention: true`, `autoBackup: true` e `maxSize: 2147483648`. No caminho padrão, liste os arquivos:
 
 ```powershell
 Get-ChildItem "$env:SystemRoot\System32\winevt\Logs" -Filter 'Archive-Security-*.evtx'
 ```
 
-Se o log foi realocado, confira `logFileName` na saída de `wevtutil gl Security`.
-Proteja os arquivos e monitore espaço/erros de arquivamento: sem espaço, a coleta
-pode ser comprometida. Defina retenção, backup e destino restrito antes de usar
-em produção; não coloque os logs em compartilhamento aberto aos funcionários.
+Se o log foi movido, confira `logFileName` em `wevtutil gl Security`.
 
-**O relatório atual não lê automaticamente os arquivos arquivados.** É preciso
-consultá-los separadamente no Visualizador de Eventos ou com Get-WinEvent -Path.
-A integração dessa leitura com os relatórios ainda não foi implementada. Não
-mova nem apague o arquivo ativo Security.evtx; planeje a movimentação apenas dos
-arquivos de arquivo, sem interferir com o serviço de eventos.
+**Monitore o espaço:** arquivos arquivados se acumulam e falta de espaço pode comprometer a coleta. Guarde-os em pasta restrita e defina uma rotina de retenção. Não mova nem apague o arquivo ativo `Security.evtx`.
 
-Para desativar o arquivamento e voltar ao modo de sobrescrever eventos antigos
-quando cheio (isso permite perder histórico antigo sem arquivo), o comando é:
+Os relatórios ainda não leem arquivos arquivados. Abra-os no Visualizador de Eventos ou consulte separadamente com `Get-WinEvent -Path`.
+
+Para voltar à sobrescrita dos eventos antigos quando o log encher, sem arquivamento automático:
 
 ```powershell
 wevtutil sl Security /rt:false /ab:false
 ```
 
-## Verificação antes de analisar os relatórios
-
-Confirme servidor, relógio/fuso, período, tipo de evento, auditoria, SACL quando
-necessária, acesso ao log e limites dos filtros. Confira avisos e cobertura.
-Mantenha o CSV original sem agrupamento e um registro da configuração de coleta.
+Essa opção pode descartar histórico antigo. Escolha conforme a retenção exigida pela empresa.

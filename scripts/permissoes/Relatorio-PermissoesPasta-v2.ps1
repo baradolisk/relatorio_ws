@@ -1,46 +1,41 @@
 ﻿#requires -Version 5.1
+
 <#
 .SYNOPSIS
-    Versão revisada v2. -CsvCobertura registra falhas; com -CsvSaida, gera
-    cobertura automaticamente. Não calcula permissões efetivas.
-    Relatório de PERMISSÕES (compartilhamento + NTFS) das pastas compartilhadas.
+    Lista permissões dos compartilhamentos e das pastas.
 
 .DESCRIPTION
-    Complementa o Relatorio-AcessoPasta.ps1. Enquanto aquele mostra QUEM
-    ACESSOU, este mostra QUEM PODE acessar e destaca permissões amplas demais
-    (Everyone, Authenticated Users, Domain Users, BUILTIN\Users, NETWORK).
-    Se um acesso indevido deu êxito, quase sempre a causa está aqui.
+    Execute no Windows com acesso aos dados consultados. Exemplos partem da raiz do repositório.
+    Lista regras individuais; não calcula a permissão efetiva de cada usuário.
+    Não examina arquivos individuais nem compartilhamentos administrativos.
 
-    Para cada compartilhamento não administrativo, lista:
-      - permissões do compartilhamento (Get-SmbShareAccess);
-      - permissões NTFS da raiz e das subpastas até -Profundidade níveis,
-        indicando se é herdada, se a herança está desabilitada na pasta e se
-        a permissão permite gravar/excluir/alterar permissões.
-
-    A detecção de "amplo" é feita por SID (independe do idioma do Windows).
-    Execute como Administrador. Somente leitura: nada é alterado.
+.PARAMETER CsvCobertura
+    Arquivo de cobertura. Com CsvSaida, é gerado automaticamente se omitido.
 
 .PARAMETER Computador
-    Servidores de arquivos (ex.: "SRV1","SRV2"). Padrão: computador local.
+    Servidores a consultar. Padrão: computador local.
 
 .PARAMETER Compartilhamento
-    Filtro (com curingas) pelo nome do compartilhamento. Padrão: *
+    Filtro pelo nome do compartilhamento. Padrão: todos os não administrativos.
 
 .PARAMETER Profundidade
-    Quantos níveis de subpastas ler abaixo da raiz (0 = só a raiz). Padrão: 1.
-    Valores altos em servidores grandes podem demorar bastante.
+    Níveis de subpastas: 0 a 10. Padrão: 1; zero examina apenas a raiz.
 
 .PARAMETER SomenteAmplas
-    Mostra/exporta apenas as permissões amplas.
+    Mostra apenas regras de permissão identificadas como amplas.
 
 .PARAMETER CsvSaida
-    Exporta o relatório completo em CSV (";" e UTF-8). Aceita o token {data}.
+    Arquivo CSV detalhado. Aceita {data} no nome.
 
 .EXAMPLE
-    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -Profundidade 2 -CsvSaida "C:\Relatorios\permissoes-{data}.csv"
+    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -Profundidade 2
 
 .EXAMPLE
-    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -Computador "SRV-ARQ1","SRV-ARQ2" -SomenteAmplas
+    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -CsvSaida "C:\Relatorios\permissoes-{data}.csv"
+
+.NOTES
+    Veja README.md, docs/PARAMETROS.md e docs/EXEMPLOS.md para mais opções.
+    PowerShell 5.1 e Windows Server real ainda precisam de validação no seu ambiente.
 #>
 
 [CmdletBinding()]
