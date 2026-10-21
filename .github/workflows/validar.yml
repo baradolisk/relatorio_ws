@@ -1,0 +1,18 @@
+name: Validar PowerShell
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sintaxe-e-regressoes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxe e funções isoladas (sem acesso a Windows, AD ou SMB)
+        shell: pwsh
+        run: ./tests/Test-Relatorios.ps1

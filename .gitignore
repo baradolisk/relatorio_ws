@@ -1,0 +1,16 @@
+# Saídas locais: não versionar dados de auditoria.
+/Relatorios/
+/relatorios/
+/reports/
+/TestResults/
+*.evtx
+*.log
+*.tmp
+# CSVs gerados pelos exemplos; o modelo de regras permanece versionado.
+**/*-detalhado-*.csv
+**/*-resumo-*.csv
+**/acessos-*.csv
+**/detalhado-*.csv
+**/resumo-*.csv
+**/permissoes-*.csv
+**/*.cobertura.csv

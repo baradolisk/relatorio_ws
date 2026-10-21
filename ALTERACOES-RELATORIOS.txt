@@ -169,3 +169,17 @@ Exemplos (ajustar SERVER e Administracao ao servidor/share reais):
 .\Relatorio-AcessoPasta.ps1 -Computador SERVER -Pasta "\\SERVER\Administracao" -Dias 1 -EventoId 5145
 .\Relatorio-AcessoPasta.ps1 -Computador SERVER -Pasta "E:\FileServer" -Dias 1 -EventoId 5145
 Para conferir os nomes reais, executar no servidor: Get-SmbShare | Select-Object Name,Path
+
+DOCUMENTAÇÃO E USO POR TERCEIROS
+- README com escolha de versão, requisitos, instalação e exemplos de coleta.
+- docs/PARAMETROS.md com parâmetros do original, v8 e inventários.
+- docs/AUDITORIA-WINDOWS.md com auditoria, tamanho e arquivamento do log.
+- docs/SOLUCAO-DE-PROBLEMAS.md com os diagnósticos mais frequentes.
+- CONTRIBUTING.md com orientações para contribuir e validar sem dados reais.
+- .gitignore para saídas comuns e arquivos EVTX.
+- tests/Test-Relatorios.ps1: 23 verificações locais de sintaxe e funções
+  isoladas com dados simulados, aprovadas no PowerShell 7.4.13 em Linux.
+- GitHub Actions configurado para executar o teste em push/pull request.
+  A configuração do workflow não comprova sua execução no GitHub.
+- Nenhuma lógica dos relatórios foi alterada nesta entrega. Não há consulta
+  automática a arquivos EVTX arquivados nem validação de integração Windows.
