@@ -144,7 +144,7 @@
     Autorizacao passa a ter: Autorizado, NAO AUTORIZADO, Sem regra ou
     Indeterminado (grupo não lido). NAO AUTORIZADO é divergência da regra de negócio; 5145 não comprova leitura
     de conteúdo. A associação AD é consultada no momento da execução. Requer o módulo ActiveDirectory (RSAT).
-    Veja ListaAutorizados-exemplo.csv.
+    Veja examples/ListaAutorizados-exemplo.csv, a partir da raiz do repositório.
 
 .PARAMETER EnriquecerAD
     Preenche Departamento e Cargo de cada usuário (módulo ActiveDirectory).
@@ -169,30 +169,30 @@
     Devolve os registros como objetos no pipeline, para uso em outros scripts.
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 7
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 7
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 3 -IgnorarAtributos -Agrupar -CsvSaida "C:\Temp\acessos.csv"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 3 -IgnorarAtributos -Agrupar -CsvSaida "C:\Temp\acessos.csv"
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "D:\Dados\RH\Folha" -Usuario "maria" -UsuarioExato -Dias 30 -EventoId 4663
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "D:\Dados\RH\Folha" -Usuario "maria" -UsuarioExato -Dias 30 -EventoId 4663
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Inicio "2026-10-19 08:00" -Fim "2026-10-19 18:00" -Computador "SRV-ARQ1","SRV-ARQ2"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Inicio "2026-10-19 08:00" -Fim "2026-10-19 18:00" -Computador "SRV-ARQ1","SRV-ARQ2"
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "Financeiro" -Dias 7 -Resultado Falha -CsvSaida "C:\Temp\falhas.csv"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Financeiro" -Dias 7 -Resultado Falha -CsvSaida "C:\Temp\falhas.csv"
 
 .EXAMPLE
-    .\Relatorio-AcessoPasta.ps1 -Pasta "Dados" -Dias 1 -IncluirContasComputador
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Pasta "Dados" -Dias 1 -IncluirContasComputador
 
 .EXAMPLE
     # Todos os compartilhamentos, últimas 24h, sem contas de serviço
-    .\Relatorio-AcessoPasta.ps1 -Dias 1 -IgnorarAtributos -Agrupar -ExcluirUsuarios "svc-*" -CsvSaida "C:\Relatorios\acessos-{data}.csv" -CsvResumo "C:\Relatorios\resumo-{data}.csv"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Dias 1 -IgnorarAtributos -Agrupar -ExcluirUsuarios "svc-*" -CsvSaida "C:\Relatorios\acessos-{data}.csv" -CsvResumo "C:\Relatorios\resumo-{data}.csv"
 
 .EXAMPLE
     # Cruza os acessos com a lista de autorizados e traz departamento/estação
-    .\Relatorio-AcessoPasta.ps1 -Dias 7 -Agrupar -ListaAutorizados "C:\Relatorios\autorizados.csv" -EnriquecerAD -ResolverIP -ListarCompartilhamentos -Computador "SRV-ARQ1","SRV-ARQ2"
+    .\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 -Dias 7 -Agrupar -ListaAutorizados "C:\Relatorios\autorizados.csv" -EnriquecerAD -ResolverIP -ListarCompartilhamentos -Computador "SRV-ARQ1","SRV-ARQ2"
 
 .NOTES
     Para o evento 4663:

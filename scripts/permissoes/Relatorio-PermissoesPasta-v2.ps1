@@ -37,10 +37,10 @@
     Exporta o relatório completo em CSV (";" e UTF-8). Aceita o token {data}.
 
 .EXAMPLE
-    .\Relatorio-PermissoesPasta.ps1 -Profundidade 2 -CsvSaida "C:\Relatorios\permissoes-{data}.csv"
+    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -Profundidade 2 -CsvSaida "C:\Relatorios\permissoes-{data}.csv"
 
 .EXAMPLE
-    .\Relatorio-PermissoesPasta.ps1 -Computador "SRV-ARQ1","SRV-ARQ2" -SomenteAmplas
+    .\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 -Computador "SRV-ARQ1","SRV-ARQ2" -SomenteAmplas
 #>
 
 [CmdletBinding()]

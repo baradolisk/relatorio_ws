@@ -183,3 +183,14 @@ DOCUMENTAÇÃO E USO POR TERCEIROS
   A configuração do workflow não comprova sua execução no GitHub.
 - Nenhuma lógica dos relatórios foi alterada nesta entrega. Não há consulta
   automática a arquivos EVTX arquivados nem validação de integração Windows.
+
+REORGANIZAÇÃO DO REPOSITÓRIO
+- Relatorio-AcessoPasta.ps1 e Relatorio-AcessoPasta-v8.ps1 movidos para scripts/acessos/.
+- Relatorio-PermissoesPasta-v2.ps1 movido para scripts/permissoes/.
+- Inventário anterior movido para legacy/permissoes/.
+- CSV de exemplo movido para examples/ e este histórico para docs/.
+- Exemplos da ajuda, README, guias e testes ajustados aos novos caminhos.
+- Comandos e tarefas agendadas que apontam para a raiz precisam ser atualizados.
+- Os corpos executáveis e parâmetros dos relatórios foram preservados;
+  somente os exemplos em comentários de ajuda dos scripts atuais mudaram.
+- As referências de entregas anteriores neste histórico usam os nomes da época.

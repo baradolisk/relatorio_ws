@@ -31,7 +31,7 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
 
 # Cada conjunto usa escopo próprio para não misturar funções das versões.
 & {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-AcessoPasta.ps1'))
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'))
     Assert-Resultado ((ConvertTo-ShareServidor '\\*\z' 'SRV.empresa.local') -eq '\\SRV.empresa.local\z') 'ShareName com servidor curinga'
     Assert-Resultado (Test-FiltroRede '\\SRV\z\RH' '\\SRV.empresa.local\z' 'RH\a.txt' 'SRV.empresa.local' 'SRV') 'UNC curto e FQDN'
     Assert-Resultado (-not (Test-FiltroRede '\\OUTRO\z' '\\SRV\z' 'a.txt' 'SRV' 'SRV')) 'Servidor diferente'
@@ -41,7 +41,7 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
 }
 
 & {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-AcessoPasta-v8.ps1'))
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta-v8.ps1'))
     $sidPermitido = 'S-1-5-21-1-2-3-1001'
     $membros = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
     [void]$membros.Add($sidPermitido)
@@ -71,7 +71,7 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
 }
 
 & {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-PermissoesPasta-v2.ps1'))
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/permissoes/Relatorio-PermissoesPasta-v2.ps1'))
     Assert-Resultado (Test-SidAmplo 'S-1-1-0') 'Everyone por SID'
     Assert-Resultado (-not (Test-SidAmplo 'S-1-5-21-1-2-3-1001')) 'Usuário específico não é grupo amplo'
     Assert-Resultado (Test-DireitoEscrita 2) 'Direito de escrita'

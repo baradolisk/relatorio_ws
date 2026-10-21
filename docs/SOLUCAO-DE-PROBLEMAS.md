@@ -1,5 +1,7 @@
 # Solução de problemas
 
+Os exemplos de execução pressupõem a raiz do repositório como diretório atual.
+
 ## Script não assinado / execução bloqueada
 
 Inspecione a política:
@@ -11,7 +13,7 @@ Get-ExecutionPolicy -List
 Após conferir a origem do arquivo, remova a marca de download:
 
 ```powershell
-Unblock-File -LiteralPath .\Relatorio-AcessoPasta.ps1
+Unblock-File -LiteralPath .\scripts\acessos\Relatorio-AcessoPasta.ps1
 ```
 
 Se MachinePolicy e UserPolicy estiverem Undefined e a política da empresa
@@ -29,14 +31,14 @@ com Unblock-File; siga o processo de assinatura do administrador do domínio.
 O nome pertence a Usuario; UsuarioExato é um switch:
 
 ```powershell
-.\Relatorio-AcessoPasta.ps1 -Usuario "usuario.teste" -UsuarioExato -Dias 1
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Usuario "usuario.teste" -UsuarioExato -Dias 1
 ```
 
 Para evitar erros de continuação de linha, use splatting:
 
 ```powershell
 $opcoes = @{Usuario='usuario.teste'; UsuarioExato=$true; Dias=1}
-.\Relatorio-AcessoPasta.ps1 @opcoes
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 @opcoes
 ```
 
 UsuarioExato diferencia caixa no log. Para investigar grafia/domínio, remova a

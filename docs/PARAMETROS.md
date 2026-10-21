@@ -1,5 +1,7 @@
 # Parâmetros
 
+Os exemplos de execução pressupõem a raiz do repositório como diretório atual.
+
 Opções de ativação (`switch`) são usadas sem valor, por exemplo `-Silencioso`.
 Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 `-Usuario "usuario"`, nunca em `-UsuarioExato "usuario"`.
@@ -35,7 +37,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 Exemplo de objetos, sem exportação obrigatória:
 
 ```powershell
-$registros = .\Relatorio-AcessoPasta.ps1 -Dias 1 -Silencioso -PassThru
+$registros = .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Dias 1 -Silencioso -PassThru
 $registros | Where-Object Resultado -eq 'Falha'
 ```
 
@@ -69,8 +71,8 @@ inventariar arquivos individuais ou incluir shares administrativos nesses script
 ## Ajuda integrada
 
 ```powershell
-Get-Help .\Relatorio-AcessoPasta.ps1 -Full
-Get-Command .\Relatorio-AcessoPasta.ps1 -Syntax
+Get-Help .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Full
+Get-Command .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Syntax
 ```
 
 São aceitos também parâmetros comuns do PowerShell, como Verbose e ErrorAction.

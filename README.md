@@ -4,16 +4,57 @@ Scripts PowerShell para investigar acessos a arquivos compartilhados, exportar e
 
 Os scripts consultam dados; não alteram permissões nem habilitam auditoria automaticamente. Para identificar divergências de negócio, é necessário definir quais grupos deveriam acessar cada pasta.
 
+## Estrutura do repositório
+
+```text
+.
+├── scripts/
+│   ├── acessos/
+│   │   ├── Relatorio-AcessoPasta.ps1
+│   │   └── Relatorio-AcessoPasta-v8.ps1
+│   └── permissoes/
+│       └── Relatorio-PermissoesPasta-v2.ps1
+├── examples/
+│   └── ListaAutorizados-exemplo.csv
+├── legacy/
+│   └── permissoes/
+│       └── Relatorio-PermissoesPasta.ps1
+├── docs/
+│   ├── PARAMETROS.md
+│   ├── AUDITORIA-WINDOWS.md
+│   ├── SOLUCAO-DE-PROBLEMAS.md
+│   └── ALTERACOES-RELATORIOS.txt
+├── tests/
+│   └── Test-Relatorios.ps1
+├── .github/workflows/validar.yml
+├── CONTRIBUTING.md
+└── README.md
+```
+
+**Execute os exemplos a partir da raiz do checkout.** Os scripts ficam em
+`scripts/`, os modelos em `examples/` e a versão anterior de permissões em
+`legacy/`. Os scripts continuam independentes e podem ser copiados para outro
+local, desde que o comando de execução aponte para o arquivo correto.
+
+### Atualização de instalações existentes
+
+Os arquivos `.ps1` não ficam mais na raiz. Atualize comandos, atalhos e tarefas
+agendadas para os caminhos da tabela abaixo; por exemplo,
+`.\Relatorio-AcessoPasta.ps1` passou a ser
+`.\scripts\acessos\Relatorio-AcessoPasta.ps1`. Se o script foi copiado para
+outro diretório fora do checkout, essa cópia não é atualizada pelo Git.
+Os parâmetros e a lógica dos relatórios foram preservados nesta reorganização.
+
 ## Qual arquivo utilizar?
 
 | Arquivo | Uso |
 | --- | --- |
-| [Relatorio-AcessoPasta.ps1](Relatorio-AcessoPasta.ps1) | Versão original com correção recente de filtros de rede: aceita trecho, caminho local e UNC; traduz UNC para caminho local no evento 4663 quando consegue consultar o inventário SMB. |
-| [Relatorio-AcessoPasta-v8.ps1](Relatorio-AcessoPasta-v8.ps1) | Revisão com autorização por SID, regras de caminho completo e CSV de cobertura. Indicada quando é necessário classificar acessos com uma lista de autorizados. |
-| [Relatorio-PermissoesPasta-v2.ps1](Relatorio-PermissoesPasta-v2.ps1) | Versão recomendada do inventário de ACEs SMB/NTFS, com cobertura de erros. |
-| [Relatorio-PermissoesPasta.ps1](Relatorio-PermissoesPasta.ps1) | Versão anterior, preservada para referência; possui falha conhecida de conversão de lista no PowerShell 7.4. Prefira a v2. |
-| [ListaAutorizados-exemplo.csv](ListaAutorizados-exemplo.csv) | Modelo fictício para adaptar à política de acesso da empresa. |
-| [ALTERACOES-RELATORIOS.txt](ALTERACOES-RELATORIOS.txt) | Histórico detalhado das alterações e limitações. |
+| [Relatorio-AcessoPasta.ps1](scripts/acessos/Relatorio-AcessoPasta.ps1) | Versão original com correção recente de filtros de rede: aceita trecho, caminho local e UNC; traduz UNC para caminho local no evento 4663 quando consegue consultar o inventário SMB. |
+| [Relatorio-AcessoPasta-v8.ps1](scripts/acessos/Relatorio-AcessoPasta-v8.ps1) | Revisão com autorização por SID, regras de caminho completo e CSV de cobertura. Indicada quando é necessário classificar acessos com uma lista de autorizados. |
+| [Relatorio-PermissoesPasta-v2.ps1](scripts/permissoes/Relatorio-PermissoesPasta-v2.ps1) | Versão recomendada do inventário de ACEs SMB/NTFS, com cobertura de erros. |
+| [Relatorio-PermissoesPasta.ps1](legacy/permissoes/Relatorio-PermissoesPasta.ps1) | Versão anterior, preservada para referência; possui falha conhecida de conversão de lista no PowerShell 7.4. Prefira a v2. |
+| [ListaAutorizados-exemplo.csv](examples/ListaAutorizados-exemplo.csv) | Modelo fictício para adaptar à política de acesso da empresa. |
+| [ALTERACOES-RELATORIOS.txt](docs/ALTERACOES-RELATORIOS.txt) | Histórico detalhado das alterações e limitações. |
 
 As versões de acessos ainda não foram unificadas: a correção UNC mais recente está no **original**. A v8 normaliza `\\*\Share`, mas não possui o mesmo tratamento de nome curto/FQDN, alias e tradução UNC para 4663. No v8, prefira o caminho exibido no CSV; para 4663, use caminho local.
 
@@ -40,7 +81,7 @@ Set-Location .\relatorio_ws
 Após conferir a origem e o conteúdo dos arquivos baixados, se a política permitir scripts locais:
 
 ```powershell
-Get-ChildItem -Path . -Filter *.ps1 | Unblock-File
+Get-ChildItem -Path .\scripts -Filter *.ps1 -Recurse | Unblock-File
 Get-ExecutionPolicy -List
 ```
 
@@ -51,7 +92,7 @@ Não substitua uma política corporativa. Se uma GPO exigir `AllSigned`, os arqu
 No servidor de arquivos, abra um arquivo compartilhado a partir de outra estação e consulte uma janela curta:
 
 ```powershell
-.\Relatorio-AcessoPasta.ps1 `
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 `
     -Inicio (Get-Date).AddMinutes(-15) `
     -Fim (Get-Date) `
     -EventoId 5145 `
@@ -67,13 +108,13 @@ CSV usa separador `;` e datas formatadas. O token `{data}` é substituído no no
 
 ```powershell
 # Trecho: também pode encontrar RH-antigo, por exemplo.
-.\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1
 
 # Caminho local: inclui eventos correspondentes sob a raiz informada.
-.\Relatorio-AcessoPasta.ps1 -Pasta "E:\FileServer" -Dias 1
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Pasta "E:\FileServer" -Dias 1
 
 # UNC: use o NOME DO COMPARTILHAMENTO, não o nome da pasta no disco.
-.\Relatorio-AcessoPasta.ps1 -Computador "SRV-ARQ1" -Pasta "\\SRV-ARQ1\z\RH" -Dias 1
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Computador "SRV-ARQ1" -Pasta "\\SRV-ARQ1\z\RH" -Dias 1
 ```
 
 No exemplo, `z` seria o compartilhamento de `E:\FileServer`. Confirme os nomes reais no servidor:
@@ -99,7 +140,7 @@ $parametros = @{
 }
 
 foreach ($evento in 5145, 5140, 4663) {
-    .\Relatorio-AcessoPasta.ps1 @parametros `
+    .\scripts\acessos\Relatorio-AcessoPasta.ps1 @parametros `
         -EventoId $evento `
         -CsvSaida "C:\Relatorios\detalhado-$evento-{data}.csv" `
         -CsvResumo "C:\Relatorios\resumo-$evento-{data}.csv"
@@ -110,10 +151,10 @@ Cada execução aceita **um** tipo de evento. Os arquivos separados não constit
 
 ### Autorização por grupos (v8)
 
-Copie `ListaAutorizados-exemplo.csv` para um arquivo próprio e substitua caminhos/grupos pelos reais, aprovados pelo responsável pela pasta. Na v8, `Pasta` deve ser caminho completo, sem curingas. O grupo pode ser qualificado pelo domínio; confira resolução/conectividade do domínio ou use `-ServidorAD`.
+Copie `examples/ListaAutorizados-exemplo.csv` para um arquivo próprio e substitua caminhos/grupos pelos reais, aprovados pelo responsável pela pasta. Na v8, `Pasta` deve ser caminho completo, sem curingas. O grupo pode ser qualificado pelo domínio; confira resolução/conectividade do domínio ou use `-ServidorAD`.
 
 ```powershell
-.\Relatorio-AcessoPasta-v8.ps1 `
+.\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 `
     -Computador "SRV-ARQ1" `
     -Dias 1 `
     -ListaAutorizados "C:\Configuracao\autorizados.csv" `
@@ -128,7 +169,7 @@ O original mantém uma implementação anterior de autorização por nome e regr
 ### Inventário de permissões
 
 ```powershell
-.\Relatorio-PermissoesPasta-v2.ps1 `
+.\scripts\permissoes\Relatorio-PermissoesPasta-v2.ps1 `
     -Computador "SRV-ARQ1","SRV-ARQ2" `
     -Profundidade 2 `
     -CsvSaida "C:\Relatorios\permissoes-{data}.csv"

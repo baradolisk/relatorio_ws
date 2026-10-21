@@ -32,3 +32,15 @@ PowerShell e quais testes usaram fontes reais ou simuladas. Zero eventos não
 Evite misturar as versões durante uma correção: declare no PR se a alteração
 é do original, v8 ou inventário v2. Veja as diferenças no README. Caso mude
 parâmetros ou interpretação dos resultados, atualize a documentação e os testes.
+
+## Organização dos arquivos
+
+- `scripts/acessos/`: relatórios de eventos, original corrigido e v8.
+- `scripts/permissoes/`: inventário de permissões v2.
+- `legacy/permissoes/`: implementação anterior, preservada para referência.
+- `examples/`: modelos sem dados reais; saídas de relatórios não pertencem aqui.
+- `docs/`: guias e histórico; `tests/`: validações isoladas.
+
+Ao mover ou renomear um script, ajuste testes, exemplos da ajuda e documentação.
+Evite duplicar implementações na raiz para manter compatibilidade de caminhos;
+documente a migração dos comandos e das tarefas agendadas.
