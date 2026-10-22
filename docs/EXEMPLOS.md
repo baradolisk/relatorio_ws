@@ -96,7 +96,7 @@ Para exclusões, repita com `-EventoId 4660`. No menu, é a opção de evento **
 
 `0x80` e `0x20000` são consulta de metadados. Gravação é **Gravação ou criação**: não distingue arquivo novo de arquivo editado. O uso do direito DELETE em 4663 não é apresentado como exclusão confirmada; isso exige 4660.
 
-**Correlação de exclusão:** o 4660 não traz o nome do objeto. O script consulta também 4656, 4658, 4663 e eventos de reinício/limpeza, em ordem cronológica, usando servidor, SID, sessão, processo e handle. A abertura precisa estar na janela consultada e até uma hora antes da exclusão. Um fechamento, nova abertura, caminho conflitante, reinício ou contexto inválido impede aproveitar o caminho antigo.
+**Correlação de exclusão:** o 4660 não traz o nome do objeto. O script consulta também 4656, 4658, 4663 e eventos de reinício/limpeza, em ordem cronológica, usando servidor, SID, sessão, processo e handle. A abertura precisa estar na janela consultada e até cinco minutos antes da exclusão. Um fechamento, nova abertura, caminho conflitante, reinício ou contexto inválido impede aproveitar o caminho antigo.
 
 Sem correlação, a exclusão aparece com caminho vazio e aviso. Com filtro de pasta, essas linhas não aparecem porque não é possível atribuí-las à pasta; a contagem fica no `.execucao.csv`. O cache tem limite de 10.000 handles; se precisar reiniciá-lo, avisa e registra a limitação.
 

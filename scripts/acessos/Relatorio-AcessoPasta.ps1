@@ -733,7 +733,7 @@ function Update-CorrelacaoExclusao {
     $script:passosCorrelacao++
     if (($script:passosCorrelacao % 256) -eq 0) {
         foreach ($k in @($script:handlesExclusao.Keys)) {
-            if (($Evento.TimeCreated - $script:handlesExclusao[$k].Inicio).TotalSeconds -gt 3600) { $script:handlesExclusao.Remove($k) }
+            if (($Evento.TimeCreated - $script:handlesExclusao[$k].Inicio).TotalSeconds -gt 300) { $script:handlesExclusao.Remove($k) }
         }
     }
     if ($chave) {
@@ -751,7 +751,7 @@ function Update-CorrelacaoExclusao {
         elseif ($script:handlesExclusao.ContainsKey($chave)) {
             $estado = $script:handlesExclusao[$chave]
             $segundos = ($Evento.TimeCreated - $estado.Inicio).TotalSeconds
-            if ($segundos -lt 0 -or $segundos -gt 3600 -or
+            if ($segundos -lt 0 -or $segundos -gt 300 -or
                 ($id -eq 4663 -and $dados.ObjectName -and $dados.ObjectName -ine $estado.Caminho)) {
                 $script:handlesExclusao.Remove($chave)
             }
