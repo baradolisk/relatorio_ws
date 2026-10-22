@@ -6,7 +6,7 @@
     Execute no Windows com acesso aos dados consultados. Exemplos partem da raiz do repositório.
     5145: verificação SMB; não comprova leitura do conteúdo.
     5140: conexão ao compartilhamento. 4663: direito auditado no objeto; exige SACL.
-    4660: exclusão; caminho correlacionado quando há ciclo de handle disponível.
+    4660: exclusão; caminho associado por 4656 ou 4663 DELETE próximo, quando disponíveis.
     Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
 .PARAMETER MaxEventos
@@ -663,13 +663,16 @@ function Test-FiltroRede {
 
 # Classificação conservadora: máscara de gravação não distingue criação de edição.
 function Get-AcaoEvento {
-    param ([int]$Id, [string]$Mask, [string]$Resultado, [bool]$CaminhoCorrelacionado = $false)
+    param ([int]$Id, [string]$Mask, [string]$Resultado, [bool]$CaminhoCorrelacionado = $false, [int]$EventoCorrelacao = 4656)
     if ($Id -eq 4660) {
         if ($Resultado -eq 'Falha') { return @{Acao='Exclusão não confirmada';Evidencia='4660 com indicação de falha; não confirmar exclusão.'} }
         if ($CaminhoCorrelacionado) {
+            if ($EventoCorrelacao -eq 4663) {
+                return @{Acao='Exclusão confirmada'; Evidencia='4660 confirma exclusão; caminho associado ao 4663 com DELETE nos 30 segundos anteriores, com mesmo servidor, SID, sessão, processo e handle. Sem abertura 4656 correlacionada.'}
+            }
             return @{Acao='Exclusão confirmada'; Evidencia='4660 confirma exclusão; caminho associado ao 4656 no mesmo ciclo de handle.'}
         }
-        return @{Acao='Exclusão registrada; caminho não identificado'; Evidencia='4660 confirma exclusão, mas não traz nome. Sem ciclo de handle completo para associar caminho.'}
+        return @{Acao='Exclusão registrada; caminho não identificado'; Evidencia='4660 confirma exclusão, mas não traz nome. Sem abertura 4656 válida ou 4663 DELETE próximo para associar caminho.'}
     }
     if ($Id -eq 5140) {
         return @{Acao='Conexão ao compartilhamento'; Evidencia='5140 não informa a operação em cada arquivo.'}
@@ -726,42 +729,75 @@ function Update-CorrelacaoExclusao {
     $dados = @{}
     foreach ($item in $xml.Event.EventData.Data) { if ($item.Name) { $dados[[string]$item.Name] = [string]$item.'#text' } }
     $chave = Get-ChaveHandle $Evento $dados
-    $caminho = ''; $abertura = ''
-    # Consulta em ordem crescente; falha de ordenação invalida todo o contexto.
-    if ($script:ultimoRecordCorrelacao -ge [long]$Evento.RecordId) { $script:handlesExclusao.Clear() }
+    $caminho = ''; $abertura = ''; $acesso = ''; $origem = 0; $registroOrigem = ''
+    $ordemValida = $script:ultimoRecordCorrelacao -lt [long]$Evento.RecordId
+    if (-not $ordemValida) { $script:handlesExclusao.Clear() }
     $script:ultimoRecordCorrelacao = [long]$Evento.RecordId
     $script:passosCorrelacao++
     if (($script:passosCorrelacao % 256) -eq 0) {
         foreach ($k in @($script:handlesExclusao.Keys)) {
-            if (($Evento.TimeCreated - $script:handlesExclusao[$k].Inicio).TotalSeconds -gt 300) { $script:handlesExclusao.Remove($k) }
+            $limite = 300
+            if ($script:handlesExclusao[$k].Origem -eq 4663) { $limite = 30 }
+            if (($Evento.TimeCreated - $script:handlesExclusao[$k].Inicio).TotalSeconds -gt $limite) { $script:handlesExclusao.Remove($k) }
         }
     }
     if ($chave) {
         if ($id -eq 4656) {
             $script:handlesExclusao.Remove($chave)
-            if (-not ($Evento.Keywords -band 0x10000000000000) -and $dados.ObjectName -and $dados.ObjectType -eq 'File') {
+            if ($ordemValida -and -not ($Evento.Keywords -band 0x10000000000000) -and $dados.ObjectName -and $dados.ObjectType -eq 'File') {
                 if ($script:handlesExclusao.Count -ge 10000) {
-                    $script:handlesExclusao.Clear()
-                    $script:descartesCorrelacao++
+                    $script:handlesExclusao.Clear(); $script:descartesCorrelacao++
                 }
-                $script:handlesExclusao[$chave] = @{Caminho=$dados.ObjectName;Inicio=$Evento.TimeCreated;RecordId=$Evento.RecordId}
+                $script:handlesExclusao[$chave] = @{Caminho=$dados.ObjectName;Inicio=$Evento.TimeCreated;RecordId=$Evento.RecordId;Origem=4656;RecordIdAcesso=''}
             }
         }
         elseif ($id -eq 4658) { $script:handlesExclusao.Remove($chave) }
-        elseif ($script:handlesExclusao.ContainsKey($chave)) {
-            $estado = $script:handlesExclusao[$chave]
-            $segundos = ($Evento.TimeCreated - $estado.Inicio).TotalSeconds
-            if ($segundos -lt 0 -or $segundos -gt 300 -or
-                ($id -eq 4663 -and $dados.ObjectName -and $dados.ObjectName -ine $estado.Caminho)) {
-                $script:handlesExclusao.Remove($chave)
+        else {
+            $bloquearAlternativa = -not $ordemValida
+            if ($script:handlesExclusao.ContainsKey($chave)) {
+                $estado = $script:handlesExclusao[$chave]
+                $segundos = ($Evento.TimeCreated - $estado.Inicio).TotalSeconds
+                $limite = 300
+                if ($estado.Origem -eq 4663) { $limite = 30 }
+                $conflito = $id -eq 4663 -and $dados.ObjectName -and $dados.ObjectName -ine $estado.Caminho
+                if ($segundos -lt 0 -or $segundos -gt $limite -or $conflito) {
+                    $script:handlesExclusao.Remove($chave)
+                    if ($segundos -lt 0 -or $conflito) { $bloquearAlternativa = $true }
+                }
             }
-            elseif ($id -eq 4660) { $caminho=$estado.Caminho; $abertura=[string]$estado.RecordId }
+            $mask = ConvertTo-AccessMask ([string]$dados.AccessMask)
+            $deleteValido = $id -eq 4663 -and $null -ne $mask -and ($mask -band 0x10000) -and
+                ($Evento.Keywords -band 0x20000000000000) -and -not ($Evento.Keywords -band 0x10000000000000) -and
+                $dados.ObjectType -eq 'File' -and -not [string]::IsNullOrWhiteSpace($dados.ObjectName)
+            if ($deleteValido -and -not $bloquearAlternativa) {
+                if (-not $script:handlesExclusao.ContainsKey($chave)) {
+                    if ($script:handlesExclusao.Count -ge 10000) {
+                        $script:handlesExclusao.Clear(); $script:descartesCorrelacao++
+                    }
+                    $script:handlesExclusao[$chave] = @{Caminho=$dados.ObjectName;Inicio=$Evento.TimeCreated;RecordId=$Evento.RecordId;Origem=4663;RecordIdAcesso=$Evento.RecordId}
+                }
+                elseif ($script:handlesExclusao[$chave].Origem -eq 4663) {
+                    # Usar o DELETE mais recente no mesmo objeto, sem alargar a janela.
+                    $script:handlesExclusao[$chave].Inicio = $Evento.TimeCreated
+                    $script:handlesExclusao[$chave].RecordId = $Evento.RecordId
+                    $script:handlesExclusao[$chave].RecordIdAcesso = $Evento.RecordId
+                }
+                else { $script:handlesExclusao[$chave].RecordIdAcesso = $Evento.RecordId }
+            }
+            if ($id -eq 4660 -and $script:handlesExclusao.ContainsKey($chave)) {
+                $estado = $script:handlesExclusao[$chave]
+                $caminho = $estado.Caminho
+                $origem = [int]$estado.Origem
+                $registroOrigem = [string]$estado.RecordId
+                $acesso = [string]$estado.RecordIdAcesso
+                if ($origem -eq 4656) { $abertura = $registroOrigem }
+            }
         }
         if ($id -eq 4660) { $script:handlesExclusao.Remove($chave) }
     }
     if ($id -eq 4660) {
         if (-not $caminho) { $script:exclusoesSemCaminho++ }
-        return @{Caminho=$caminho;RecordIdAbertura=$abertura;Dados=$dados}
+        return @{Caminho=$caminho;RecordIdAbertura=$abertura;RecordIdAcesso=$acesso;EventoCorrelacao=$origem;RecordIdCorrelacao=$registroOrigem;Dados=$dados}
     }
     return $null
 }
@@ -1010,7 +1046,13 @@ function Convert-EventoAcesso {
             -CaminhoLocal $caminhoLocal
 
 
-        $classificacao = Get-AcaoEvento -Id $EventoId -Mask ([string]$dado['AccessMask']) -Resultado $resultadoAcesso -CaminhoCorrelacionado ([bool]($Correlacao -and $Correlacao.Caminho))
+        $origemCorrelacao = 0; $registroCorrelacao = ''; $registroAcesso = ''
+        if ($Correlacao) {
+            $origemCorrelacao = [int]$Correlacao.EventoCorrelacao
+            $registroCorrelacao = [string]$Correlacao.RecordIdCorrelacao
+            $registroAcesso = [string]$Correlacao.RecordIdAcesso
+        }
+        $classificacao = Get-AcaoEvento -EventoCorrelacao $origemCorrelacao -Id $EventoId -Mask ([string]$dado['AccessMask']) -Resultado $resultadoAcesso -CaminhoCorrelacionado ([bool]($Correlacao -and $Correlacao.Caminho))
         $idAbertura = ''
         if ($Correlacao) { $idAbertura = [string]$Correlacao.RecordIdAbertura }
         return [PSCustomObject]@{
@@ -1050,6 +1092,9 @@ function Convert-EventoAcesso {
             Acao             = $classificacao.Acao
             Evidencia        = $classificacao.Evidencia
             RecordIdAbertura  = $idAbertura
+            EventoCorrelacao  = $origemCorrelacao
+            RecordIdCorrelacao = $registroCorrelacao
+            RecordIdAcesso    = $registroAcesso
         }
 
     }
@@ -1932,7 +1977,7 @@ foreach ($servidor in $Computador) {
 
     if ($EventoId -eq 4660) {
         $parametrosLog.Oldest = $true
-        Write-Host 'Correlacionando exclusões em ordem cronológica; inclui eventos de suporte. Sem correlação, o caminho fica vazio.' -ForegroundColor DarkGray
+        Write-Host 'Correlacionando exclusões em ordem cronológica; inclui eventos de suporte. Usa 4656 ou 4663 DELETE próximo; sem evidência, o caminho fica vazio.' -ForegroundColor DarkGray
     }
     if ($MaxEventos -gt 0) { $parametrosLog.MaxEvents = $MaxEventos }
     $tempoConsulta = [Diagnostics.Stopwatch]::StartNew()
@@ -1981,7 +2026,7 @@ foreach ($servidor in $Computador) {
                         $registro.LogonId,
                         $registro.IP,
                         $registro.Porta,
-                        ($registro.Objeto + '|' + $registro.RecordIdAbertura + '|' + $registro.HandleId),
+                        ($registro.Objeto + '|' + $registro.RecordIdAbertura + '|' + $registro.RecordIdCorrelacao + '|' + $registro.HandleId),
                         $registro.Acesso,
                         $registro.AccessMask,
                         $registro.ProcessId,
@@ -2498,6 +2543,9 @@ if (-not [string]::IsNullOrWhiteSpace($CsvSaida)) {
                     Acao             = Protect-CsvCell $_.Acao
                     Evidencia        = Protect-CsvCell $_.Evidencia
                     RecordIdAbertura  = $_.RecordIdAbertura
+                    EventoCorrelacao  = $_.EventoCorrelacao
+                    RecordIdCorrelacao = $_.RecordIdCorrelacao
+                    RecordIdAcesso    = $_.RecordIdAcesso
                 }
             } |
             Export-Csv `

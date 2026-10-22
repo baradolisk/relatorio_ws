@@ -281,3 +281,19 @@ AÇÕES NOS ARQUIVOS E HISTÓRICO EM LEGACY
 - A v8 não foi alterada. Windows real e PowerShell 5.1 ainda precisam de teste.
 - Validação final: 103 verificações simuladas aprovadas no PowerShell 7.4.13;
   nenhuma validação em Windows real foi realizada nesta entrega.
+
+CORRELAÇÃO ALTERNATIVA 4663 DELETE → 4660
+- Reproduzido o diagnóstico: registros 26485571/26485572 e 26485602/26485603
+  com os mesmos handles e sessão, sem abertura 4656 presente.
+- Quando não há abertura válida, aceita 4663 de êxito, tipo File, caminho
+  preenchido e bit DELETE (0x10000) até 30 segundos antes do evento 4660.
+- Compara servidor, SID, sessão, processo e handle; normaliza IDs numéricos.
+- Mantém preferência pela abertura 4656 com janela de cinco minutos.
+- Preserva invalidação por fechamento, reinício, troca de caminho e ordem
+  inconsistente; nenhuma evidência isolada confirma uma exclusão.
+- Acrescenta EventoCorrelacao, RecordIdCorrelacao e RecordIdAcesso ao CSV.
+  RecordIdAbertura não é preenchido com um registro 4663.
+- Evidencia informa se o caminho veio de abertura ou de DELETE próximo.
+- Snapshot anterior à alternativa preservado em
+  legacy/acessos/Relatorio-AcessoPasta-antes-correlacao4663.ps1.
+- 127 verificações simuladas aprovadas; sem validação em Windows real nesta entrega.

@@ -70,7 +70,7 @@ foreach ($evento in 5145, 5140, 4663) {
 }
 ```
 
-Não combine Dias com Inicio/Fim. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas e minúsculas. Cada evento gera arquivos separados; o script não os correlaciona automaticamente.
+Não combine Dias com Inicio/Fim. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas e minúsculas. Os três tipos geram arquivos separados; esses CSVs não são cruzados entre si.
 
 ## Ações nos arquivos
 
@@ -92,17 +92,20 @@ Para exclusões, repita com `-EventoId 4660`. No menu, é a opção de evento **
 | --- | --- |
 | Acao | Classificação baseada nos direitos e no tipo de evento |
 | Evidencia | Explica o que o evento permite concluir |
-| RecordIdAbertura | Registro 4656 usado para associar a exclusão ao caminho, quando disponível |
+| RecordIdAbertura | Registro 4656, quando usado; fica vazio na alternativa sem abertura |
+| EventoCorrelacao | 4656 ou 4663: origem do caminho associado à exclusão |
+| RecordIdCorrelacao | Registro que forneceu o caminho |
+| RecordIdAcesso | Registro 4663 com DELETE, quando disponível |
 
 `0x80` e `0x20000` são consulta de metadados. Gravação é **Gravação ou criação**: não distingue arquivo novo de arquivo editado. O uso do direito DELETE em 4663 não é apresentado como exclusão confirmada; isso exige 4660.
 
-**Correlação de exclusão:** o 4660 não traz o nome do objeto. O script consulta também 4656, 4658, 4663 e eventos de reinício/limpeza, em ordem cronológica, usando servidor, SID, sessão, processo e handle. A abertura precisa estar na janela consultada e até cinco minutos antes da exclusão. Um fechamento, nova abertura, caminho conflitante, reinício ou contexto inválido impede aproveitar o caminho antigo.
+**Correlação de exclusão:** o 4660 não traz o nome do objeto. O script consulta também 4656, 4658, 4663 e eventos de reinício/limpeza, em ordem cronológica, usando servidor, SID, sessão, processo e handle. Prioriza abertura 4656 dentro da janela consultada e até cinco minutos antes da exclusão. Sem abertura válida, aceita 4663 com DELETE (`0x10000`, inclusive em máscaras combinadas), êxito e nome do objeto, até 30 segundos antes do 4660. As evidências precisam coincidir em servidor, SID, sessão, processo e handle; o CSV informa a fonte utilizada. Um fechamento, nova abertura, caminho conflitante, reinício ou contexto inválido impede aproveitar o caminho antigo.
 
 Sem correlação, a exclusão aparece com caminho vazio e aviso. Com filtro de pasta, essas linhas não aparecem porque não é possível atribuí-las à pasta; a contagem fica no `.execucao.csv`. O cache tem limite de 10.000 handles; se precisar reiniciá-lo, avisa e registra a limitação.
 
 Nesse modo, o filtro de usuário é aplicado depois da correlação, mesmo com UsuarioExato. MaxEventos também conta os eventos de suporte e lê os primeiros em ordem cronológica; atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
 
-A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Logs ausentes, aberturas anteriores ao período e operações longas podem deixar exclusões sem caminho. O script não altera a política nem a SACL.
+A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Metadados, gravação, DELETE_CHILD sozinho e DELETE com falha não alimentam a alternativa. O 4663 sozinho não confirma exclusão: é necessário o 4660 posterior. Logs ausentes, contexto inconsistente ou evidências fora do período/limite podem deixar o caminho vazio. O script não altera a política nem a SACL.
 
 A v8 não recebeu essas colunas nem o suporte a 4660 nesta alteração.
 

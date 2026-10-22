@@ -62,7 +62,7 @@ Na v8, use caminhos completos nas regras. Para filtrar por rede, use o nome que 
 No relatório original, o CSV detalhado inclui **Acao**, **Evidencia** e **RecordIdAbertura**. O resumo inclui **Acoes** e **Evidencias**.
 
 - **4663:** leitura, gravação/criação, atributos e direitos de exclusão.
-- **4660:** exclusão confirmada; o caminho depende de correlação com eventos de abertura do objeto.
+- **4660:** exclusão confirmada; o caminho vem de uma abertura 4656 ou de um 4663 com DELETE próximo.
 - **5145:** verificação de acesso, não confirmação da operação.
 
 O log não separa com segurança “novo” de “editado”. Veja [como consultar ações](docs/EXEMPLOS.md#ações-nos-arquivos).

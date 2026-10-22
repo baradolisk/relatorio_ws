@@ -313,17 +313,18 @@ public class EventoTesteDesempenho : IDisposable {
     function New-EventoCorrelacao {
         param([int]$Id,[int]$Record,[string]$Nome='E:\FileServer\RH\a.txt',
               [string]$Handle='0x10',[string]$ProcessId='0x20',[string]$Sid='S-1-5-21-1-2-3-1001',
-              [int]$Segundos=$Record,[string]$Servidor='SRV',[string]$SessaoId='0x30')
+              [int]$Segundos=$Record,[string]$Servidor='SRV',[string]$SessaoId='0x30',
+              [string]$Mask='0x10000',[long]$Keywords=0x20000000000000)
         $dados = @{
             SubjectUserName='Admrh01';SubjectDomainName='EMPRESA';SubjectUserSid=$Sid
             SubjectLogonId=$SessaoId;ProcessId=$ProcessId;HandleId=$Handle;ObjectType='File'
-            AccessMask='0x10000';ProcessName='C:\Windows\explorer.exe'
+            AccessMask=$Mask;ProcessName='C:\Windows\explorer.exe'
         }
         if($Id -in @(4656,4663)){$dados.ObjectName=$Nome}
         $xml='<Event><EventData>'
         foreach($k in $dados.Keys){$xml+='<Data Name="'+$k+'">'+[Security.SecurityElement]::Escape([string]$dados[$k])+'</Data>'}
         $xml+='</EventData></Event>'
-        $e=[pscustomobject]@{Id=$Id;RecordId=$Record;MachineName=$Servidor;TimeCreated=([datetime]::new(2026,10,22)).AddSeconds($Segundos);Keywords=0x20000000000000;Xml=$xml}
+        $e=[pscustomobject]@{Id=$Id;RecordId=$Record;MachineName=$Servidor;TimeCreated=([datetime]::new(2026,10,22)).AddSeconds($Segundos);Keywords=$Keywords;Xml=$xml}
         $e | Add-Member ScriptMethod ToXml {return $this.Xml}
         return $e
     }
@@ -371,6 +372,51 @@ public class EventoTesteDesempenho : IDisposable {
     $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4656 1)
     Assert-Resultado ($script:handlesExclusao.Count -eq 1 -and $script:descartesCorrelacao -eq 1) 'Limitar memória sem associar contexto descartado'
 
+    # Alternativa 4663 DELETE sem abertura 4656 (cenário observado no servidor).
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1)
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2)
+    Assert-Resultado ($r.Caminho -eq 'E:\FileServer\RH\a.txt' -and $r.EventoCorrelacao -eq 4663) '4663 DELETE fornece caminho sem 4656'
+    Assert-Resultado (-not $r.RecordIdAbertura -and $r.RecordIdAcesso -eq 1 -and $r.RecordIdCorrelacao -eq 1) 'Evidência alternativa não inventa registro de abertura'
+    Assert-Resultado ((Get-AcaoEvento -Id 4660 -Resultado 'Êxito' -CaminhoCorrelacionado $true -EventoCorrelacao 4663).Evidencia -like '*4663 com DELETE*') 'Explicar fonte alternativa no CSV'
+    foreach($semDelete in @('0x80','0x20000','0x40','0x2')){
+        Reset-CorrelacaoTeste
+        $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1 -Mask $semDelete)
+        $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2)
+        Assert-Resultado (-not $r.Caminho) 'Metadados, gravação e DELETE_CHILD não fornecem caminho de exclusão'
+    }
+    foreach($diferenca in @(@{ProcessId='0x21'},@{Sid='S-1-5-21-9-8-7-1001'},@{Servidor='OUTRO'},@{Handle='0x11'},@{SessaoId='0x31'},@{Segundos=32})){
+        Reset-CorrelacaoTeste
+        $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1)
+        $r=Update-CorrelacaoExclusao (New-EventoCorrelacao -Id 4660 -Record 2 @diferenca)
+        Assert-Resultado (-not $r.Caminho) 'Alternativa respeita identidade, handle e janela de 30 segundos'
+    }
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1)
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2 -Segundos 31)
+    Assert-Resultado ([bool]$r.Caminho) 'Aceitar limite de 30 segundos'
+    foreach($reset in @(4658,4608,4609,1102)){
+        Reset-CorrelacaoTeste
+        $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1)
+        $null=Update-CorrelacaoExclusao (New-EventoCorrelacao $reset 2)
+        $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 3)
+        Assert-Resultado (-not $r.Caminho) 'Fechamento e reinícios também invalidam a alternativa'
+    }
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1 -Keywords 0x10000000000000)
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2)
+    Assert-Resultado (-not $r.Caminho) 'DELETE com falha não fornece evidência alternativa'
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 1)
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 2 -Nome 'E:\OUTRO.txt')
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 3)
+    Assert-Resultado (-not $r.Caminho) 'Caminho conflitante não é substituído silenciosamente'
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4656 1)
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4663 2)
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 3)
+    Assert-Resultado ($r.EventoCorrelacao -eq 4656 -and $r.RecordIdAbertura -eq 1 -and $r.RecordIdAcesso -eq 2) 'Preservar prioridade de 4656 sem perder evidência DELETE'
+
     function Get-WinEvent {
         [CmdletBinding()]
         param($ListLog,$LogName,$MaxEvents,[switch]$Oldest,$FilterXPath,$ComputerName)
@@ -384,17 +430,24 @@ public class EventoTesteDesempenho : IDisposable {
         New-EventoCorrelacao 4660 3
         New-EventoCorrelacao 4658 4
         New-EventoCorrelacao 4660 5
+        New-EventoCorrelacao 4663 26485571 -Nome 'E:\FileServer\TI\TESTES\Nova pasta' -Handle '0x6744' -ProcessId '0x4' -SessaoId '0xC2A58611' -Segundos 52838
+        New-EventoCorrelacao 4660 26485572 -Handle '0x6744' -ProcessId '0x4' -SessaoId '0xc2a58611' -Segundos 52838
+        New-EventoCorrelacao 4663 26485602 -Nome 'E:\FileServer\TI\TESTES\Nova pasta' -Handle '0x4038' -ProcessId '0x4' -SessaoId '0xC2A58611' -Segundos 52846
+        New-EventoCorrelacao 4660 26485603 -Handle '0x4038' -ProcessId '0x4' -SessaoId '0xc2a58611' -Segundos 52846
     }
     $temporario=Join-Path ([IO.Path]::GetTempPath()) ('acoes-'+[guid]::NewGuid().ToString('N'))
     $null=New-Item -ItemType Directory -Path $temporario
     try{
         $csv=Join-Path $temporario 'exclusoes.csv'
         $r=@(& $relatorio -EventoId 4660 -Computador SRV -Usuario Admrh01 -UsuarioExato -CsvSaida $csv -Silencioso -PassThru 3>$null 6>$null)
-        Assert-Resultado ($r.Count -eq 2 -and $r[0].EventoId -eq 4660) 'Retornar apenas exclusões, não eventos de suporte'
-        Assert-Resultado (@($r | Where-Object Acao -eq 'Exclusão confirmada').Count -eq 1) 'Somente exclusão com caminho correlacionado recebe a classificação completa'
+        Assert-Resultado ($r.Count -eq 4 -and $r[0].EventoId -eq 4660) 'Retornar apenas exclusões, não eventos de suporte'
+        Assert-Resultado (@($r | Where-Object Acao -eq 'Exclusão confirmada').Count -eq 3) 'Somente exclusão com caminho correlacionado recebe a classificação completa'
         Assert-Resultado (@($r | Where-Object Acao -like '*caminho não identificado').Count -eq 1) 'Preservar exclusão sem caminho quando não há filtro de pasta'
         $exportado=@(Import-Csv -LiteralPath $csv -Delimiter ';')
-        Assert-Resultado ($exportado.Count -eq 2 -and 'Evidencia' -in $exportado[0].PSObject.Properties.Name -and 'RecordIdAbertura' -in $exportado[0].PSObject.Properties.Name) 'CSV inclui ação, evidência e registro de abertura'
+        Assert-Resultado ($exportado.Count -eq 4 -and 'Evidencia' -in $exportado[0].PSObject.Properties.Name -and 'RecordIdAbertura' -in $exportado[0].PSObject.Properties.Name) 'CSV inclui ação, evidência e registro de abertura'
+        $alternativas=@($exportado | Where-Object EventoCorrelacao -eq '4663')
+        Assert-Resultado ($alternativas.Count -eq 2 -and $alternativas[0].Objeto -eq 'E:\FileServer\TI\TESTES\Nova pasta') 'Exportar caminho dos dois pares do diagnóstico'
+        Assert-Resultado (@($alternativas | Where-Object RecordIdAbertura).Count -eq 0 -and @($alternativas | Where-Object RecordIdAcesso -eq '26485602').Count -eq 1) 'CSV diferencia registro de acesso e abertura'
         $diag=Import-Csv -LiteralPath ($csv+'.execucao.csv') -Delimiter ';'
         Assert-Resultado ($diag.ExclusoesSemCaminho -eq 1) 'Diagnóstico contabiliza exclusões sem caminho'
         $r=@(& $relatorio -EventoId 4660 -Computador SRV -Pasta 'RH' -Silencioso -PassThru 3>$null 6>$null)
