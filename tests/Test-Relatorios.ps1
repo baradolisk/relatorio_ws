@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# Testes isolados: não consulta serviços Windows nem executa o corpo dos relatórios.
+# Testes com fontes simuladas: não consulta serviços Windows, AD ou SMB reais.
 $ErrorActionPreference = 'Stop'
 $raiz = Split-Path -Parent $PSScriptRoot
 $script:verificacoes = 0
@@ -76,6 +76,100 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
     Assert-Resultado (-not (Test-SidAmplo 'S-1-5-21-1-2-3-1001')) 'Usuário específico não é grupo amplo'
     Assert-Resultado (Test-DireitoEscrita 2) 'Direito de escrita'
     Assert-Resultado (-not (Test-DireitoEscrita 1)) 'Leitura não é escrita'
+}
+
+# Exercitar o menu com entradas simuladas; nenhuma consulta ao Windows.
+& {
+    $relatorio = Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+    Invoke-Expression (Import-FuncoesTeste $relatorio)
+    $global:TesteRelatoriosEntradasMenu = New-Object 'System.Collections.Generic.Queue[string]'
+    $global:TesteRelatoriosMensagensMenu = New-Object 'System.Collections.Generic.List[string]'
+    function Read-Host {
+        param ([string]$Prompt)
+        if (-not $global:TesteRelatoriosEntradasMenu.Count) { throw "Entrada simulada esgotada: $Prompt" }
+        return $global:TesteRelatoriosEntradasMenu.Dequeue()
+    }
+    function Clear-Host { }
+    function Write-Host {
+        param ([Parameter(Position=0)]$Object, $ForegroundColor)
+        $global:TesteRelatoriosMensagensMenu.Add([string]$Object)
+    }
+    function Get-WinEvent { throw 'O menu não deve consultar eventos ao sair.' }
+
+    $global:TesteRelatoriosEntradasMenu.Enqueue('Q')
+    & $relatorio -Menu -Pasta 'RH' -Computador 'SRV-TESTE'
+    Assert-Resultado ($global:TesteRelatoriosEntradasMenu.Count -eq 0) 'Menu integrado encerra sem consultar logs'
+    Assert-Resultado (@($global:TesteRelatoriosMensagensMenu | Where-Object { $_ -like '*RH*' }).Count -gt 0) 'Menu mantém filtro inicial'
+
+    $temporario = Join-Path ([IO.Path]::GetTempPath()) ('menu-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $temporario
+    $alvo = Join-Path $temporario "relatório d'empresa.ps1"
+    $destino = Join-Path $temporario 'capturado.json'
+    # O alvo simulado registra somente os argumentos recebidos.
+    $fonte = @'
+param($Computador, $EventoId, $Dias, $Inicio, $Fim, $Pasta, $Usuario,
+      [switch]$UsuarioExato, $Resultado, $ExcluirUsuarios, $CsvSaida, $CsvResumo,
+      $ListaAutorizados, [switch]$PassThru, [switch]$Silencioso)
+$PSBoundParameters | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $env:RELATORIO_TESTE_CAPTURA -Encoding UTF8
+'@
+    $variavelAnterior = $env:RELATORIO_TESTE_CAPTURA
+    try {
+        Set-Content -LiteralPath $alvo -Value $fonte -Encoding UTF8
+        $env:RELATORIO_TESTE_CAPTURA = $destino
+        foreach ($r in @('E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        $ini = [datetime]::new(2026,10,15,8,30,45)
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{
+            Computador=@('SRV1','SRV2'); Inicio=$ini; Pasta='RH'; Usuario='joao'
+            UsuarioExato=$true; PassThru=$true; Silencioso=$true
+        }
+        $captura = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado ($captura.Computador.Count -eq 2) 'Menu preserva vários servidores'
+        Assert-Resultado ($captura.Pasta -eq 'RH' -and $captura.Usuario -eq 'joao') 'Menu encaminha filtros'
+        Assert-Resultado ($null -eq $captura.Dias -and $null -ne $captura.Inicio) 'Menu não mistura Dias e Inicio'
+        Assert-Resultado ($captura.UsuarioExato.IsPresent -and $captura.PassThru.IsPresent) 'Menu encaminha switches'
+        Assert-Resultado ($null -eq $captura.Menu) 'Execução do relatório não reabre o menu'
+        $comando = @($global:TesteRelatoriosMensagensMenu | Where-Object { $_.StartsWith("& '") })[-1]
+        Assert-Resultado ($comando.Contains("d''empresa.ps1")) 'Comando copiável escapa apóstrofos e usa caminho completo'
+        Assert-Resultado ($comando.Contains('[datetime]::new(2026,10,15,8,30,45,0)')) 'Comando copiável preserva data sem depender de idioma'
+        Remove-Item -LiteralPath $destino
+        foreach ($r in @('E','N','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{Computador=@('SRV')}
+        Assert-Resultado (-not (Test-Path -LiteralPath $destino)) 'Cancelar não executa o relatório'
+
+        # Limpar pasta e substituir a janela de dias por um período sem fim.
+        foreach ($r in @('4','-','3','2','15/10/2026 08:00','-','E','S','','Q')) {
+            $global:TesteRelatoriosEntradasMenu.Enqueue($r)
+        }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{
+            Computador=@('SRV'); Pasta='RH'; Dias=5
+        }
+        $captura = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado ($null -eq $captura.Pasta) 'Hífen remove o filtro de pasta'
+        Assert-Resultado ($null -ne $captura.Inicio -and $null -eq $captura.Fim -and $null -eq $captura.Dias) 'Período aberto não inclui fim ou dias'
+        # O uso antigo por parâmetros não deve abrir o menu.
+        function Get-WinEvent {
+            [CmdletBinding()]
+            param ($ListLog, $LogName, $MaxEvents, [switch]$Oldest, $FilterXPath, $ComputerName)
+            if ($ListLog) { return [pscustomobject]@{MaximumSizeInBytes=2147483648} }
+            if ($Oldest) { return [pscustomobject]@{TimeCreated=(Get-Date).AddDays(-10)} }
+            $evento = [pscustomobject]@{
+                Id=5145; RecordId=1; MachineName='SRV'; TimeCreated=(Get-Date).AddMinutes(-1)
+                Keywords=0x20000000000000
+            }
+            $evento | Add-Member ScriptMethod ToXml {
+                '<Event><EventData><Data Name="SubjectUserName">joao</Data><Data Name="SubjectDomainName">EMPRESA</Data><Data Name="ShareName">\\*\z</Data><Data Name="ShareLocalPath">\??\E:\FileServer</Data><Data Name="RelativeTargetName">RH\a.txt</Data><Data Name="AccessMask">0x1</Data></EventData></Event>'
+            }
+            return $evento
+        }
+        $registros = @(& $relatorio -Computador 'SRV' -Pasta 'RH' -Dias 1 -Silencioso -PassThru)
+        Assert-Resultado ($registros.Count -eq 1 -and $registros[0].Usuario -eq 'EMPRESA\joao') 'Execução normal continua sem perguntas'
+
+    }
+    finally {
+        $env:RELATORIO_TESTE_CAPTURA = $variavelAnterior
+        Remove-Item -LiteralPath $temporario -Recurse -Force
+        Remove-Variable -Name TesteRelatoriosEntradasMenu,TesteRelatoriosMensagensMenu -Scope Global -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."

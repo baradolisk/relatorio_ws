@@ -21,6 +21,17 @@ Troque `RH` pela pasta desejada. O CSV será salvo em `C:\Relatorios` com a data
 
 Se o Windows bloquear o arquivo, consulte [como desbloquear](docs/SOLUCAO-DE-PROBLEMAS.md#script-bloqueado).
 
+## Prefere escolher as opções na tela?
+
+```powershell
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
+```
+
+Escolha pasta, usuário, período e arquivos de saída. **E** executa; **Q** sai.
+Enter mantém o valor; `-` limpa um filtro ou caminho. O menu mostra o comando equivalente antes de executar.
+
+O menu está no relatório original. Para tarefas agendadas, continue usando os parâmetros sem `-Menu`.
+
 ## Qual script usar?
 
 | Quero… | Script |

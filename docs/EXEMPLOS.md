@@ -2,6 +2,19 @@
 
 Execute a partir da pasta principal do repositório. Ajuste servidores, usuários e datas.
 
+## Menu interativo
+
+```powershell
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
+
+# Abrir com valores preenchidos
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu -Pasta "RH" -Dias 5
+```
+
+As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Uma nova data inicial é obrigatória. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
+
+A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões e não substitui a classificação por SID da v8.
+
 ## Todas as pastas e contas
 
 Sem Pasta, consulta todas as pastas presentes nos eventos. As duas opções abaixo incluem também contas de computador e compartilhamentos administrativos:

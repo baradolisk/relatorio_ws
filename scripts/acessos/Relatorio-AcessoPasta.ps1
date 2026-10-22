@@ -8,6 +8,9 @@
     5140: conexão ao compartilhamento. 4663: direito auditado no objeto; exige SACL.
     Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
+.PARAMETER Menu
+    Abre o menu interativo. Omita em tarefas agendadas.
+
 .PARAMETER Pasta
     Nome, trecho ou caminho da pasta. Omita para pesquisar todas.
 
@@ -78,6 +81,9 @@
     Retorna os registros como objetos PowerShell.
 
 .EXAMPLE
+    .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
+
+.EXAMPLE
     .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1
 
 .EXAMPLE
@@ -145,7 +151,9 @@ param (
 
     [switch]$GridView,
 
-    [switch]$PassThru
+    [switch]$PassThru,
+
+    [switch]$Menu
 )
 
 # ATENÇÃO: nomes de variáveis no PowerShell não diferenciam maiúsculas de
@@ -920,6 +928,524 @@ function Convert-EventoAcesso {
     }
 }
 
+
+# Menu opcional; executa este mesmo arquivo com os parâmetros escolhidos.
+function Show-MenuRelatorioAcesso {
+    param ([string]$ScriptRelatorio, [hashtable]$ParametrosIniciais = @{})
+    $ptBR = [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')
+
+    # A leitura real exige Windows; o menu pode ser inspecionado sem consultar dados.
+    if ($env:OS -eq 'Windows_NT') {
+        try {
+            $ehAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)
+            if (-not $ehAdmin) { Write-Warning 'Abra como administrador se a leitura do log for negada.' }
+        } catch { Write-Verbose 'Não foi possível verificar a elevação da sessão.' }
+    }
+
+    # ============================================================
+    # Configuração atual (valores iniciais = padrões do script original)
+    # ============================================================
+
+    $cfg = [ordered]@{
+        Computador       = @($env:COMPUTERNAME)
+        EventoId         = 5145
+        UsaPeriodo       = $false
+        Dias             = 1
+        Inicio           = $null
+        Fim              = $null
+        Pasta            = ''
+        Usuario          = '*'
+        UsuarioExato     = $false
+        Resultado        = 'Todos'
+        ExcluirUsuarios  = @()
+        CsvSaida         = ''
+        CsvResumo        = ''
+        ListaAutorizados = ''
+    }
+
+    $opcoes = [ordered]@{
+        IgnorarAtributos                  = @{ Ativo = $false; Desc = 'Descarta acessos de "ruído" (ler atributos/permissões)' }
+        Agrupar                           = @{ Ativo = $false; Desc = 'Agrupa eventos repetidos no mesmo minuto' }
+        IncluirContasComputador           = @{ Ativo = $false; Desc = 'Inclui contas de computador (terminadas em $)' }
+        IncluirCompartilhamentosEspeciais = @{ Ativo = $false; Desc = 'Inclui IPC$, ADMIN$, C$...' }
+        ListarCompartilhamentos           = @{ Ativo = $false; Desc = 'Lista compartilhamentos e registros encontrados' }
+        EnriquecerAD                      = @{ Ativo = $false; Desc = 'Departamento e cargo do AD' }
+        ResolverIP                        = @{ Ativo = $false; Desc = 'Nome da estação (DNS reverso)' }
+        Silencioso                        = @{ Ativo = $false; Desc = 'Não imprime resumos no console' }
+        GridView                          = @{ Ativo = $false; Desc = 'Abre o resultado em janela' }
+        PassThru                          = @{ Ativo = $false; Desc = 'Retorna objetos para o pipeline' }
+    }
+
+    # Reutilizar valores explícitos da linha de comando ao abrir o menu.
+    foreach ($chave in $ParametrosIniciais.Keys) {
+        if ($cfg.Contains($chave)) { $cfg[$chave] = $ParametrosIniciais[$chave] }
+        if ($opcoes.Contains($chave)) { $opcoes[$chave].Ativo = [bool]$ParametrosIniciais[$chave] }
+    }
+    $cfg.Computador = @($cfg.Computador)
+    $cfg.ExcluirUsuarios = @($cfg.ExcluirUsuarios)
+    $cfg.UsaPeriodo = $ParametrosIniciais.ContainsKey('Inicio')
+
+    $descEvento = @{
+        5145 = '5145 - Verificação de acesso SMB [padrão]'
+        4663 = '4663 - Uso de direito no objeto (exige SACL)'
+        5140 = '5140 - Conexão a um compartilhamento'
+    }
+
+
+    # ============================================================
+    # Funções de entrada
+    # ============================================================
+
+    function Read-Texto {
+        param (
+            [string]$Pergunta,
+            [string]$Atual = ''
+        )
+
+        if ($Atual) { $r = Read-Host "$Pergunta [$Atual]" }
+        else        { $r = Read-Host $Pergunta }
+
+        if ([string]::IsNullOrWhiteSpace($r)) { return $Atual }
+
+        $r = $r.Trim().Trim('"')
+
+        if ($r -eq '-') { return '' }   # "-" limpa o valor
+
+        return $r
+    }
+
+    function ConvertTo-Lista {
+        param ([string]$Texto)
+
+        return @(
+            $Texto -split '[,;]' |
+            ForEach-Object { $_.Trim().Trim('"') } |
+            Where-Object { $_ }
+        )
+    }
+
+    function Read-Inteiro {
+        param (
+            [string]$Pergunta,
+            [int]$Atual,
+            [int]$Min,
+            [int]$Max
+        )
+
+        while ($true) {
+
+            $r = Read-Texto $Pergunta ([string]$Atual)
+            $n = 0
+
+            if ([int]::TryParse($r, [ref]$n) -and $n -ge $Min -and $n -le $Max) {
+                return $n
+            }
+
+            Write-Host "  Valor inválido. Informe um número entre $Min e $Max." -ForegroundColor Yellow
+        }
+    }
+
+    function Read-Data {
+        param (
+            [string]$Pergunta,
+            $Atual,
+            [bool]$Opcional = $false
+        )
+
+        while ($true) {
+
+            $textoAtual = ''
+            if ($null -ne $Atual) { $textoAtual = $Atual.ToString('dd/MM/yyyy HH:mm') }
+
+            $r = Read-Texto $Pergunta $textoAtual
+
+            if ([string]::IsNullOrWhiteSpace($r)) {
+
+                if ($Opcional) { return $null }
+
+                Write-Host '  Informe uma data.' -ForegroundColor Yellow
+                continue
+            }
+
+            $d = [datetime]::MinValue
+
+            if ([datetime]::TryParse($r, $ptBR, [System.Globalization.DateTimeStyles]::None, [ref]$d)) {
+                return $d
+            }
+
+            Write-Host '  Data inválida. Use dd/MM/yyyy HH:mm (ex.: 19/10/2026 08:00).' -ForegroundColor Yellow
+        }
+    }
+
+
+    # ============================================================
+    # Edição de cada item do menu
+    # ============================================================
+
+    function Edit-Servidores {
+
+        Write-Host ''
+        Write-Host 'Um ou mais servidores de arquivos, separados por vírgula (ex.: SRV-ARQ1,SRV-ARQ2).'
+
+        $r = Read-Texto 'Servidor(es)' ($cfg.Computador -join ',')
+        $lista = ConvertTo-Lista $r
+
+        if ($lista.Count -gt 0) { $cfg.Computador = $lista }
+    }
+
+    function Edit-Evento {
+
+        Write-Host ''
+        Write-Host '  1) ' $descEvento[5145]
+        Write-Host '  2) ' $descEvento[4663]
+        Write-Host '  3) ' $descEvento[5140]
+
+        $r = Read-Host 'Escolha o evento (Enter mantém o atual)'
+
+        switch ($r.Trim()) {
+            '1' { $cfg.EventoId = 5145 }
+            '2' { $cfg.EventoId = 4663 }
+            '3' { $cfg.EventoId = 5140 }
+        }
+    }
+
+    function Edit-Periodo {
+
+        Write-Host ''
+        Write-Host '  1) Últimos N dias'
+        Write-Host '  2) Período específico (início e fim)'
+
+        $r = (Read-Host 'Escolha').Trim()
+
+        if ($r -eq '1') {
+
+            $cfg.UsaPeriodo = $false
+            $cfg.Dias = Read-Inteiro 'Quantos dias para trás' $cfg.Dias 1 3650
+        }
+        elseif ($r -eq '2') {
+
+            while ($true) {
+
+                $ini = Read-Data 'Início (dd/MM/yyyy HH:mm)' $cfg.Inicio
+                $fim = Read-Data 'Fim (Enter mantém; "-" = até agora)' $cfg.Fim $true
+
+                if ($null -ne $fim -and $fim -le $ini) {
+                    Write-Host '  O fim deve ser posterior ao início.' -ForegroundColor Yellow
+                    continue
+                }
+
+                $cfg.Inicio = $ini
+                $cfg.Fim = $fim
+                $cfg.UsaPeriodo = $true
+                break
+            }
+        }
+    }
+
+    function Edit-Pasta {
+
+        Write-Host ''
+        Write-Host 'Trecho do caminho, pasta, arquivo ou compartilhamento a filtrar.'
+        Write-Host 'Exemplos: RH | E:\FileServer\RH | \\SRV\z\RH'
+        Write-Host 'Enter mantém a pasta atual; "-" pesquisa todas as pastas.'
+
+        $cfg.Pasta = Read-Texto 'Pasta' $cfg.Pasta
+    }
+
+    function Edit-Usuario {
+
+        Write-Host ''
+        Write-Host 'Aceita curingas (joao, joao*, *silva*) ou DOMINIO\usuario. "*" = todos.'
+
+        $r = Read-Texto 'Usuário' $cfg.Usuario
+
+        if ([string]::IsNullOrWhiteSpace($r)) { $r = '*' }
+
+        $cfg.Usuario = $r
+
+        $cfg.UsuarioExato = $false
+
+        if ($r -notmatch '[\*\?\[\]\\"'']') {
+
+            $exato = Read-Host 'Filtrar direto no log (mais rápido, diferencia maiúsculas/minúsculas)? (S/N) [N]'
+
+            if ($exato -match '^[sSyY]') { $cfg.UsuarioExato = $true }
+        }
+    }
+
+    function Edit-Resultado {
+
+        Write-Host ''
+        Write-Host '  1) Todos'
+        Write-Host '  2) Somente êxito'
+        Write-Host '  3) Somente falha'
+
+        $r = Read-Host 'Escolha (Enter mantém o atual)'
+
+        switch ($r.Trim()) {
+            '1' { $cfg.Resultado = 'Todos' }
+            '2' { $cfg.Resultado = 'Exito' }
+            '3' { $cfg.Resultado = 'Falha' }
+        }
+    }
+
+    function Edit-ExcluirUsuarios {
+
+        Write-Host ''
+        Write-Host 'Contas de serviço a ignorar, separadas por vírgula (curingas aceitos).'
+        Write-Host 'Exemplo: svc-backup,svc-av*   ("-" limpa a lista)'
+
+        $r = Read-Texto 'Excluir usuários' ($cfg.ExcluirUsuarios -join ',')
+
+        $cfg.ExcluirUsuarios = ConvertTo-Lista $r
+    }
+
+    function Edit-Opcoes {
+
+        while ($true) {
+
+            $chaves = @($opcoes.Keys)
+
+            Write-Host ''
+
+            for ($i = 0; $i -lt $chaves.Count; $i++) {
+
+                $k = $chaves[$i]
+
+                if ($opcoes[$k].Ativo) { $marca = 'X' } else { $marca = ' ' }
+
+                Write-Host ('  {0,2}) [{1}] {2,-35} {3}' -f ($i + 1), $marca, $k, $opcoes[$k].Desc)
+            }
+
+            $r = Read-Host 'Números para marcar/desmarcar (ex.: 1,2) ou Enter para voltar'
+
+            if ([string]::IsNullOrWhiteSpace($r)) { return }
+
+            foreach ($n in (ConvertTo-Lista $r)) {
+
+                if ($n -match '^\d+$' -and [int]$n -ge 1 -and [int]$n -le $chaves.Count) {
+
+                    $k = $chaves[[int]$n - 1]
+                    $opcoes[$k].Ativo = -not $opcoes[$k].Ativo
+                }
+            }
+        }
+    }
+
+    function Edit-Csv {
+        param ([string]$Campo, [string]$Titulo)
+
+        Write-Host ''
+        Write-Host 'Caminho do arquivo CSV. Aceita {data} (vira yyyyMMdd-HHmmss).'
+        Write-Host 'Exemplo: C:\Relatorios\acessos-{data}.csv   ("-" desativa)'
+
+        $cfg[$Campo] = Read-Texto $Titulo $cfg[$Campo]
+    }
+
+    function Edit-ListaAutorizados {
+
+        Write-Host ''
+        Write-Host 'CSV (separador ";") com as colunas Pasta;Grupo. Requer RSAT/ActiveDirectory.'
+
+        while ($true) {
+
+            $r = Read-Texto 'Lista de autorizados ("-" desativa)' $cfg.ListaAutorizados
+
+            if ([string]::IsNullOrWhiteSpace($r) -or (Test-Path -LiteralPath $r)) {
+                $cfg.ListaAutorizados = $r
+                return
+            }
+
+            Write-Host '  Arquivo não encontrado.' -ForegroundColor Yellow
+        }
+    }
+
+
+    # ============================================================
+    # Montagem e execução
+    # ============================================================
+
+    function New-Parametros {
+
+        $p = @{}
+
+        $p.Computador = @($cfg.Computador)
+        $p.EventoId = [int]$cfg.EventoId
+
+        if ($cfg.UsaPeriodo -and $null -ne $cfg.Inicio) {
+
+            $p.Inicio = $cfg.Inicio
+
+            if ($null -ne $cfg.Fim) { $p.Fim = $cfg.Fim }
+        }
+        else {
+            $p.Dias = [int]$cfg.Dias
+        }
+
+        if ($cfg.Pasta)                     { $p.Pasta = $cfg.Pasta }
+        if ($cfg.Usuario -and $cfg.Usuario -ne '*') { $p.Usuario = $cfg.Usuario }
+        if ($cfg.UsuarioExato)              { $p.UsuarioExato = $true }
+        if ($cfg.Resultado -ne 'Todos')     { $p.Resultado = $cfg.Resultado }
+        if ($cfg.ExcluirUsuarios.Count -gt 0) { $p.ExcluirUsuarios = @($cfg.ExcluirUsuarios) }
+        if ($cfg.CsvSaida)                  { $p.CsvSaida = $cfg.CsvSaida }
+        if ($cfg.CsvResumo)                 { $p.CsvResumo = $cfg.CsvResumo }
+        if ($cfg.ListaAutorizados)          { $p.ListaAutorizados = $cfg.ListaAutorizados }
+
+        foreach ($k in $opcoes.Keys) {
+            if ($opcoes[$k].Ativo) { $p[$k] = $true }
+        }
+
+        return $p
+    }
+
+    function Format-Valor {
+        param ($Valor)
+
+        if ($Valor -is [datetime]) {
+            return '[datetime]::new(' + (@($Valor.Year, $Valor.Month, $Valor.Day, $Valor.Hour, $Valor.Minute, $Valor.Second, $Valor.Millisecond) -join ',') + ')'
+        }
+        if ($Valor -is [int])      { return [string]$Valor }
+
+        if ($Valor -is [array]) {
+            return (($Valor | ForEach-Object { Format-Valor $_ }) -join ',')
+        }
+
+        return "'" + ([string]$Valor -replace "'", "''") + "'"
+    }
+
+    function Format-Comando {
+        param ($Parametros)
+
+        $partes = @('& ' + (Format-Valor $ScriptRelatorio))
+
+        foreach ($k in $Parametros.Keys) {
+
+            if ($Parametros[$k] -is [bool]) { $partes += "-$k" }
+            else                            { $partes += "-$k " + (Format-Valor $Parametros[$k]) }
+        }
+
+        return ($partes -join ' ')
+    }
+
+    function Invoke-Relatorio {
+
+        if ($cfg.UsaPeriodo -and $null -eq $cfg.Inicio) {
+            Write-Host 'Defina o início do período antes de executar.' -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+            return
+        }
+
+        $p = New-Parametros
+
+        Write-Host ''
+        Write-Host 'Comando equivalente (revise os caminhos antes de agendar):' -ForegroundColor Cyan
+        Write-Host (Format-Comando $p) -ForegroundColor Gray
+        Write-Host ''
+
+        do { $r = (Read-Host 'Executar agora? (S/N) [S]').Trim() }
+        while ($r -notmatch '^(?:[sSnN])?$')
+        if ($r -match '^[nN]$') { return }
+
+        try {
+            & $ScriptRelatorio @p
+        }
+        catch {
+            Write-Host "Erro: $($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        Write-Host ''
+        Read-Host 'Pressione Enter para voltar ao menu' | Out-Null
+    }
+
+
+    # ============================================================
+    # Menu principal
+    # ============================================================
+
+    function Show-Menu {
+
+        Clear-Host
+
+        if ($cfg.UsaPeriodo -and $null -ne $cfg.Inicio) {
+
+            $textoPeriodo = $cfg.Inicio.ToString('dd/MM/yyyy HH:mm') + ' até '
+
+            if ($null -ne $cfg.Fim) { $textoPeriodo += $cfg.Fim.ToString('dd/MM/yyyy HH:mm') }
+            else                    { $textoPeriodo += 'agora' }
+        }
+        else {
+            $textoPeriodo = "últimos $($cfg.Dias) dia(s)"
+        }
+
+        if ($cfg.Pasta) { $textoPasta = $cfg.Pasta } else { $textoPasta = '(todas)' }
+
+        $textoUsuario = $cfg.Usuario
+        if ($cfg.UsuarioExato) { $textoUsuario += ' (exato)' }
+
+        if ($cfg.ExcluirUsuarios.Count -gt 0) { $textoExcluir = $cfg.ExcluirUsuarios -join ', ' } else { $textoExcluir = '(nenhum)' }
+
+        $ativas = @($opcoes.Keys | Where-Object { $opcoes[$_].Ativo })
+        if ($ativas.Count -gt 0) { $textoOpcoes = $ativas -join ', ' } else { $textoOpcoes = '(nenhuma)' }
+
+        if ($cfg.CsvSaida)         { $textoCsv = $cfg.CsvSaida }         else { $textoCsv = '(não exporta)' }
+        if ($cfg.CsvResumo)        { $textoResumo = $cfg.CsvResumo }     else { $textoResumo = '(não exporta)' }
+        if ($cfg.ListaAutorizados) { $textoAut = $cfg.ListaAutorizados } else { $textoAut = '(não usa)' }
+
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' RELATÓRIO DE AUDITORIA DE ACESSOS - MENU' -ForegroundColor Cyan
+        Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host " 1) Servidor(es)          : $($cfg.Computador -join ', ')"
+        Write-Host " 2) Evento                : $($descEvento[[int]$cfg.EventoId])"
+        Write-Host " 3) Período               : $textoPeriodo"
+        Write-Host " 4) Pasta/compartilhamento: $textoPasta"
+        Write-Host " 5) Usuário               : $textoUsuario"
+        Write-Host " 6) Resultado             : $($cfg.Resultado)"
+        Write-Host " 7) Excluir usuários      : $textoExcluir"
+        Write-Host " 8) Opções                : $textoOpcoes"
+        Write-Host " 9) CSV detalhado         : $textoCsv"
+        Write-Host "10) CSV resumo            : $textoResumo"
+        Write-Host "11) Lista de autorizados  : $textoAut"
+        Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
+        Write-Host ' E) Executar relatório      Q) Sair'
+        Write-Host ' Enter mantém o valor; - limpa um filtro ou caminho.'
+        if ($cfg.ListaAutorizados) { Write-Host ' Autorização por grupos: prefira a v8 para classificação por SID.' -ForegroundColor Yellow }
+        Write-Host '============================================================' -ForegroundColor DarkGray
+    }
+
+    while ($true) {
+
+        Show-Menu
+
+        $op = (Read-Host 'Escolha uma opção').Trim().ToUpper()
+
+        switch ($op) {
+            '1'  { Edit-Servidores }
+            '2'  { Edit-Evento }
+            '3'  { Edit-Periodo }
+            '4'  { Edit-Pasta }
+            '5'  { Edit-Usuario }
+            '6'  { Edit-Resultado }
+            '7'  { Edit-ExcluirUsuarios }
+            '8'  { Edit-Opcoes }
+            '9'  { Edit-Csv -Campo 'CsvSaida'  -Titulo 'CSV detalhado' }
+            '10' { Edit-Csv -Campo 'CsvResumo' -Titulo 'CSV resumo' }
+            '11' { Edit-ListaAutorizados }
+            'E'  { Invoke-Relatorio }
+            'Q'  { return }
+            default { }
+        }
+    }
+}
+
+if ($Menu) {
+    $iniciais = @{}
+    foreach ($chave in $PSBoundParameters.Keys) {
+        if ($chave -ne 'Menu') { $iniciais[$chave] = $PSBoundParameters[$chave] }
+    }
+    Show-MenuRelatorioAcesso -ScriptRelatorio $PSCommandPath -ParametrosIniciais $iniciais
+    return
+}
 
 # ============================================================
 # Configuração inicial

@@ -200,3 +200,15 @@ TEXTOS MAIS DIRETOS
 - Guias de auditoria e erros, contribuição e ajuda dos scripts encurtados.
 - Mensagens antigas sobre acesso indevido e grupos amplos esclarecidas.
 - Parâmetros e processamento preservados. 23 verificações locais aprovadas.
+
+MENU INTERATIVO NO RELATÓRIO ORIGINAL
+- Menu enviado pelo usuário incorporado ao Relatorio-AcessoPasta.ps1.
+- Novo -Menu abre a interface; sem ele, permanece a execução por parâmetros.
+- Valores explícitos informados junto de -Menu preenchem a configuração inicial.
+- Acrescentado PassThru; textos de Enter/limpeza e interpretação de eventos corrigidos.
+- Comando equivalente usa caminho absoluto, aspas escapadas e datas independentes de cultura.
+- Execução utiliza passagem de parâmetros, sem avaliar texto digitado como código.
+- Menu não abre recursivamente ao executar; não há arquivo auxiliar necessário.
+- Menu disponível somente no original; autorização por grupos permanece com suas limitações.
+- Novos testes simulam entrada, execução, cancelamento e preservação da linha de comando.
+- Windows Server e Windows PowerShell 5.1 continuam pendentes de validação real.

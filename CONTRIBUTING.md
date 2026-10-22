@@ -15,6 +15,6 @@ pwsh -NoProfile -File .\tests\Test-Relatorios.ps1
 
 5. Abra um pull request descrevendo a mudança e o que foi testado.
 
-Os testes usam funções isoladas e dados simulados no PowerShell 7. Mudanças na coleta também precisam de teste em Windows, com log, AD e SMB reais. Zero eventos não comprova funcionamento.
+Os testes verificam funções, menu e consulta com fontes simuladas no PowerShell 7. Mudanças na coleta também precisam de teste em Windows, com log, AD e SMB reais. Zero eventos não comprova funcionamento.
 
 Mantenha relatórios em `scripts/`, modelos em `examples/`, guias em `docs/` e testes em `tests/`. Versões anteriores ficam em `legacy/`. Ao mover arquivos, ajuste caminhos e informe a migração. A execução dos relatórios deve continuar apenas consultando dados, sem alterar auditoria ou permissões.

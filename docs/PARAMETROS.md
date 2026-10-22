@@ -10,6 +10,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 
 | Parâmetro | Uso / padrão |
 | --- | --- |
+| `Menu` | Somente original: abre as opções na tela. Omita em tarefas agendadas. |
 | `Pasta` | Trecho ou caminho local/UNC. Opcional; sem ele, todas as pastas presentes nos eventos. Busca por trecho pode incluir nomes parecidos. |
 | `Dias` | Dias anteriores, 1 a 3650; padrão 1. Não combinar com Inicio/Fim. |
 | `Inicio` | Início de janela específica; obrigatório quando se usa o conjunto de parâmetros de período. |
@@ -43,7 +44,7 @@ $registros | Where-Object Resultado -eq 'Falha'
 
 ## Relatorio-AcessoPasta-v8.ps1
 
-Possui os parâmetros acima e acrescenta:
+Possui os parâmetros do original, exceto `Menu`, e acrescenta:
 
 | Parâmetro | Uso |
 | --- | --- |
