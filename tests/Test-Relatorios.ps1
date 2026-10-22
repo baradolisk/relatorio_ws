@@ -424,6 +424,7 @@ public class EventoTesteDesempenho : IDisposable {
         if($Oldest -and -not $FilterXPath){return [pscustomobject]@{TimeCreated=(Get-Date).AddDays(-10)}}
         Assert-Resultado ([bool]$Oldest) 'Consulta de exclusões exige ordem crescente'
         Assert-Resultado ($FilterXPath.Contains('EventID=4656') -and $FilterXPath.Contains('EventID=4658')) 'Consulta inclui abertura e fechamento de handle'
+        $global:TesteXPathExclusaoAtual = $FilterXPath
         # Assert-Resultado não emite objetos ao pipeline.
         New-EventoCorrelacao 4656 1
         New-EventoCorrelacao 4663 2
@@ -450,9 +451,27 @@ public class EventoTesteDesempenho : IDisposable {
         Assert-Resultado (@($alternativas | Where-Object RecordIdAbertura).Count -eq 0 -and @($alternativas | Where-Object RecordIdAcesso -eq '26485602').Count -eq 1) 'CSV diferencia registro de acesso e abertura'
         $diag=Import-Csv -LiteralPath ($csv+'.execucao.csv') -Delimiter ';'
         Assert-Resultado ($diag.ExclusoesSemCaminho -eq 1) 'Diagnóstico contabiliza exclusões sem caminho'
+        Assert-Resultado ($diag.EventosAlvoLidos -eq 4 -and $diag.EventosApoioLidos -eq 5) 'Separar exclusões e eventos de apoio no diagnóstico'
+        Assert-Resultado ($diag.EventosAlvoDescartados -eq 0 -and $diag.FalhasConversao -eq 0) 'Diagnóstico distingue descarte de conversão'
+        Assert-Resultado ([bool]$diag.UltimoHorarioProcessado) 'Informar até qual horário a leitura avançou'
+        Assert-Resultado ($diag.FiltroUsuarioNoLog -eq 'True') 'UsuarioExato otimiza também a consulta 4660'
+        # Datas são comparadas pelo serviço Windows, não pelo XPath 1.0 do XmlDocument.
+        $seletorSemTempo = $global:TesteXPathExclusaoAtual -replace ' and TimeCreated\[[^\]]+\]', ''
+        $horarioTeste = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        foreach($tipoTeste in @(4656,4658,4663,4660)){
+            [xml]$xmlTeste = "<Event><System><EventID>$tipoTeste</EventID><TimeCreated SystemTime='$horarioTeste'/></System><EventData><Data Name='SubjectUserName'>Admrh01</Data></EventData></Event>"
+            Assert-Resultado ($null -ne $xmlTeste.SelectSingleNode($seletorSemTempo)) 'Filtro mantém eventos do usuário necessários à correlação'
+        }
+        [xml]$xmlOutro = "<Event><System><EventID>4663</EventID><TimeCreated SystemTime='$horarioTeste'/></System><EventData><Data Name='SubjectUserName'>outro</Data></EventData></Event>"
+        Assert-Resultado ($null -eq $xmlOutro.SelectSingleNode($seletorSemTempo)) 'Filtro exclui apoio de outro usuário'
+        foreach($tipoTeste in @(4608,4609,1102)){
+            [xml]$xmlReset = "<Event><System><EventID>$tipoTeste</EventID><TimeCreated SystemTime='$horarioTeste'/></System></Event>"
+            Assert-Resultado ($null -ne $xmlReset.SelectSingleNode($seletorSemTempo)) 'Filtro mantém reinício e limpeza sem SubjectUserName'
+        }
+
         $r=@(& $relatorio -EventoId 4660 -Computador SRV -Pasta 'RH' -Silencioso -PassThru 3>$null 6>$null)
         Assert-Resultado ($r.Count -eq 1 -and $r[0].Objeto -eq 'E:\FileServer\RH\a.txt') 'Filtro de pasta não atribui caminho a exclusão desconhecida'
-    } finally {Remove-Item -LiteralPath $temporario -Recurse -Force}
+    } finally {Remove-Item -LiteralPath $temporario -Recurse -Force; Remove-Variable -Name TesteXPathExclusaoAtual -Scope Global -ErrorAction SilentlyContinue}
 }
 
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."

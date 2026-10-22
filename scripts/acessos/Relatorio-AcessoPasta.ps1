@@ -1888,12 +1888,16 @@ $filtroUsuarioNoLog = $false
 # Se houver aspas ou "\" no nome, o filtro fica apenas no PowerShell para evitar
 # incompatibilidades com o subconjunto XPath aceito pelo Event Log.
 if (
-    $EventoId -ne 4660 -and $UsuarioExato -and
+    $UsuarioExato -and
     $Usuario -notmatch '[\*\?\[\]\\]' -and
     $Usuario -notmatch '["'']'
 ) {
 
-    $xpath += " and EventData[Data[@Name='SubjectUserName']='$Usuario']"
+    if ($EventoId -eq 4660) {
+        # Manter reinício/limpeza mesmo sem SubjectUserName para invalidar handles.
+        $xpath += " and (EventData[Data[@Name='SubjectUserName']='$Usuario'] or System[(EventID=4608 or EventID=4609 or EventID=1102)])"
+    }
+    else { $xpath += " and EventData[Data[@Name='SubjectUserName']='$Usuario']" }
     $filtroUsuarioNoLog = $true
 }
 elseif ($UsuarioExato) {
@@ -1982,6 +1986,11 @@ foreach ($servidor in $Computador) {
     if ($MaxEventos -gt 0) { $parametrosLog.MaxEvents = $MaxEventos }
     $tempoConsulta = [Diagnostics.Stopwatch]::StartNew()
     $consultadosServidor = 0
+    $eventosAlvoLidos = 0
+    $eventosApoioLidos = 0
+    $eventosAlvoDescartados = 0
+    $falhasConversaoAntes = $falhasParse
+    $dataEventoAtual = $null
     $linhasAntes = $registros.Count
     $ultimoProgresso = -5.0
     $estadoConsulta = 'Concluída'
@@ -1996,9 +2005,13 @@ foreach ($servidor in $Computador) {
 
                 $eventoAtual = $_
                 $consultadosServidor++
+                $idEventoAtual = [int]$eventoAtual.Id
+                $dataEventoAtual = $eventoAtual.TimeCreated
+                if ($idEventoAtual -eq $EventoId) { $eventosAlvoLidos++ }
+                else { $eventosApoioLidos++ }
                 if (($tempoConsulta.Elapsed.TotalSeconds - $ultimoProgresso) -ge 5) {
                     $ultimoProgresso = $tempoConsulta.Elapsed.TotalSeconds
-                    $status = "Lidos: $consultadosServidor | Linhas encontradas: $($registros.Count - $linhasAntes) | Tempo: $($tempoConsulta.Elapsed.ToString())"
+                    $status = "Lidos: $consultadosServidor | Evento $EventoId visto: $eventosAlvoLidos | Apoio: $eventosApoioLidos | Linhas: $($registros.Count - $linhasAntes) | Processando: $($dataEventoAtual.ToString('dd/MM/yyyy HH:mm:ss')) | Tempo: $($tempoConsulta.Elapsed.ToString())"
                     Write-Progress -Id 1 -Activity "Consulta em $servidor" -Status $status
                     Write-Host $status -ForegroundColor DarkGray
                 }
@@ -2006,7 +2019,7 @@ foreach ($servidor in $Computador) {
                     if ($EventoId -eq 4660) {
                         $correlacaoAtual = Update-CorrelacaoExclusao -Evento $eventoAtual
                         $registro = $null
-                        if ([int]$eventoAtual.Id -eq 4660) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
+                        if ($idEventoAtual -eq 4660) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
                     }
                     else { $registro = Convert-EventoAcesso -Evento $eventoAtual }
                 }
@@ -2015,6 +2028,7 @@ foreach ($servidor in $Computador) {
                 }
 
                 if ($null -eq $registro) {
+                    if ($idEventoAtual -eq $EventoId) { $eventosAlvoDescartados++ }
                     return
                 }
 
@@ -2091,11 +2105,18 @@ foreach ($servidor in $Computador) {
         }
         if ($exclusoesSemCaminho -gt 0) { Write-Warning "[$servidor] $exclusoesSemCaminho exclusões sem caminho correlacionado; com filtro de pasta, essas exclusões não aparecem." }
         if ($descartesCorrelacao -gt 0) { Write-Warning "[$servidor] Contexto de correlação reiniciado por limite de memória; alguns caminhos podem ficar não identificados." }
+        if ($eventosAlvoLidos -eq 0 -and $consultadosServidor -gt 0) {
+            Write-Warning "[$servidor] Foram lidos eventos de apoio, mas nenhum evento $EventoId chegou da consulta. Confira o intervalo e a existência do evento no mesmo servidor."
+        }
+        Write-Host "[$servidor] Evento $EventoId visto: $eventosAlvoLidos; apoio: $eventosApoioLidos; alvos descartados: $eventosAlvoDescartados; falhas de conversão: $($falhasParse - $falhasConversaoAntes)."
         Write-Host "[$servidor] $consultadosServidor eventos lidos; $($registros.Count - $linhasAntes) linhas; tempo $($tempoConsulta.Elapsed)."
         $diagnosticoConsulta.Add([pscustomobject]@{
             Servidor = Protect-CsvCell $servidor; Estado = $estadoConsulta
             Inicio = $dataInicio.ToString('o'); Fim = $dataFim.ToString('o')
             EventosLidos = $consultadosServidor; Linhas = $registros.Count - $linhasAntes
+            EventosAlvoLidos = $eventosAlvoLidos; EventosApoioLidos = $eventosApoioLidos
+            EventosAlvoDescartados = $eventosAlvoDescartados; FalhasConversao = $falhasParse - $falhasConversaoAntes
+            UltimoHorarioProcessado = $(if ($dataEventoAtual) { $dataEventoAtual.ToString('o') } else { '' })
             Limite = $MaxEventos; Segundos = [math]::Round($tempoConsulta.Elapsed.TotalSeconds, 2)
             Usuario = Protect-CsvCell $Usuario; UsuarioExato = [bool]$UsuarioExato
             FiltroUsuarioNoLog = $filtroUsuarioNoLog

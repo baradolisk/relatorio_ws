@@ -53,7 +53,7 @@ O original corrigido trata nomes curtos e completos do servidor. Na v8, use o no
 
 ## Demora depois de “Consultando log”
 
-A consulta pode ler muitos eventos antes de filtrar pasta e usuário. Na versão atual, acompanhe as contagens e o tempo. Se o usuário for específico, ative UsuarioExato usando a mesma grafia do log.
+A consulta pode ler muitos eventos antes de filtrar pasta e usuário. Na versão atual, acompanhe o horário em processamento, a quantidade do evento selecionado e os registros de apoio. Zero linhas antes do término não é um resultado final. Se o usuário for específico, ative UsuarioExato usando a mesma grafia do log; isso agora reduz também a leitura do modo 4660.
 
 Para um teste curto e limitado:
 

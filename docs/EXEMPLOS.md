@@ -32,7 +32,7 @@ Na escolha de evento, digite `5145`, `4663`, `5140` ou `4660`; também são acei
 
 As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
 
-A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
+O progresso separa eventos do tipo selecionado e eventos de apoio, mostrando também o horário que está sendo processado. A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
 
 A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões e não substitui a classificação por SID da v8.
 
@@ -103,7 +103,7 @@ Para exclusões, repita com `-EventoId 4660`. No menu, é a opção de evento **
 
 Sem correlação, a exclusão aparece com caminho vazio e aviso. Com filtro de pasta, essas linhas não aparecem porque não é possível atribuí-las à pasta; a contagem fica no `.execucao.csv`. O cache tem limite de 10.000 handles; se precisar reiniciá-lo, avisa e registra a limitação.
 
-Nesse modo, o filtro de usuário é aplicado depois da correlação, mesmo com UsuarioExato. MaxEventos também conta os eventos de suporte e lê os primeiros em ordem cronológica; atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
+Com UsuarioExato, o usuário também é filtrado diretamente no log em modo 4660, preservando eventos de reinício e limpeza. Sem essa opção, o filtro de usuário continua após a leitura. A grafia deve coincidir com o log, incluindo maiúsculas e minúsculas. MaxEventos também conta os eventos de suporte e lê os primeiros em ordem cronológica; atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
 
 A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Metadados, gravação, DELETE_CHILD sozinho e DELETE com falha não alimentam a alternativa. O 4663 sozinho não confirma exclusão: é necessário o 4660 posterior. Logs ausentes, contexto inconsistente ou evidências fora do período/limite podem deixar o caminho vazio. O script não altera a política nem a SACL.
 

@@ -297,3 +297,17 @@ CORRELAÇÃO ALTERNATIVA 4663 DELETE → 4660
 - Snapshot anterior à alternativa preservado em
   legacy/acessos/Relatorio-AcessoPasta-antes-correlacao4663.ps1.
 - 127 verificações simuladas aprovadas; sem validação em Windows real nesta entrega.
+
+OTIMIZAÇÃO DO FILTRO EXATO NO EVENTO 4660
+- Cenário informado: consulta de exclusões de jhene, todas as pastas,
+  dezenas de milhares de eventos lidos sem linhas durante o processamento.
+- Corrigida limitação que impedia UsuarioExato de filtrar no serviço em modo 4660.
+- O XPath mantém os eventos de apoio do nome exato e também os eventos de
+  reinício/limpeza sem usuário, necessários para invalidar a correlação.
+- Progresso mostra horário em processamento, eventos do tipo escolhido e apoio.
+- Diagnóstico acrescenta EventosAlvoLidos, EventosApoioLidos,
+  EventosAlvoDescartados, FalhasConversao e UltimoHorarioProcessado.
+- Não presume que jhene tenha exclusões no intervalo; a grafia do nome exato
+  precisa coincidir com o log. Sem UsuarioExato, continua a leitura ampla.
+- 139 verificações simuladas aprovadas, incluindo preservação dos eventos
+  de apoio e reinício. Windows real e melhora de tempo ainda não medidos.
