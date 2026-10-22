@@ -111,6 +111,7 @@ param($Computador, $EventoId, $Dias, $Inicio, $Fim, $Pasta, $Usuario,
       [switch]$UsuarioExato, $Resultado, $ExcluirUsuarios, $CsvSaida, $CsvResumo,
       $ListaAutorizados, [switch]$PassThru, [switch]$Silencioso)
 $PSBoundParameters | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $env:RELATORIO_TESTE_CAPTURA -Encoding UTF8
+if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
 '@
     $variavelAnterior = $env:RELATORIO_TESTE_CAPTURA
     try {
@@ -118,10 +119,11 @@ $PSBoundParameters | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $env:REL
         $env:RELATORIO_TESTE_CAPTURA = $destino
         foreach ($r in @('E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
         $ini = [datetime]::new(2026,10,15,8,30,45)
-        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{
+        $objetosMenu = @(Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{
             Computador=@('SRV1','SRV2'); Inicio=$ini; Pasta='RH'; Usuario='joao'
             UsuarioExato=$true; PassThru=$true; Silencioso=$true
-        }
+        })
+        Assert-Resultado ($objetosMenu.Count -eq 1 -and $objetosMenu[0].TestePassThru -eq 'OK') 'PassThru no menu preserva objetos para o pipeline'
         $captura = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
         Assert-Resultado ($captura.Computador.Count -eq 2) 'Menu preserva vários servidores'
         Assert-Resultado ($captura.Pasta -eq 'RH' -and $captura.Usuario -eq 'joao') 'Menu encaminha filtros'
@@ -131,6 +133,11 @@ $PSBoundParameters | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $env:REL
         $comando = @($global:TesteRelatoriosMensagensMenu | Where-Object { $_.StartsWith("& '") })[-1]
         Assert-Resultado ($comando.Contains("d''empresa.ps1")) 'Comando copiável escapa apóstrofos e usa caminho completo'
         Assert-Resultado ($comando.Contains('[datetime]::new(2026,10,15,8,30,45,0)')) 'Comando copiável preserva data sem depender de idioma'
+        # Executar somente o comando gerado para o alvo de teste com dados conhecidos.
+        $null = & ([scriptblock]::Create($comando))
+        $copiado = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado (([datetime]$copiado.Inicio) -eq $ini) 'Comando exibido é executável com a mesma data'
+
         Remove-Item -LiteralPath $destino
         foreach ($r in @('E','N','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
         Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{Computador=@('SRV')}

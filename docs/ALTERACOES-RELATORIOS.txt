@@ -212,3 +212,13 @@ MENU INTERATIVO NO RELATÓRIO ORIGINAL
 - Menu disponível somente no original; autorização por grupos permanece com suas limitações.
 - Novos testes simulam entrada, execução, cancelamento e preservação da linha de comando.
 - Windows Server e Windows PowerShell 5.1 continuam pendentes de validação real.
+
+REVISÃO DA ATUALIZAÇÃO ENVIADA PELO USUÁRIO
+- Incorporada ordem fixa dos parâmetros no comando exibido pelo menu.
+- Incorporada correção das datas com parênteses para o comando ser copiável.
+- Out-Host usado apenas sem PassThru, preservando objetos no pipeline.
+- Mantidos a ajuda curta e o aviso de limitações da autorização por grupos.
+- Novos testes reproduzem a perda de PassThru no arquivo enviado e a falha
+  de interpretação da data no comando exibido pela versão anterior.
+- Versão final: 38 verificações simuladas aprovadas no PowerShell 7.4.13.
+- Sem alterações na coleta dos logs. Windows real e PowerShell 5.1 não testados.

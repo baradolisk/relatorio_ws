@@ -1268,7 +1268,7 @@ function Show-MenuRelatorioAcesso {
 
     function New-Parametros {
 
-        $p = @{}
+        $p = [ordered]@{}
 
         $p.Computador = @($cfg.Computador)
         $p.EventoId = [int]$cfg.EventoId
@@ -1303,7 +1303,7 @@ function Show-MenuRelatorioAcesso {
         param ($Valor)
 
         if ($Valor -is [datetime]) {
-            return '[datetime]::new(' + (@($Valor.Year, $Valor.Month, $Valor.Day, $Valor.Hour, $Valor.Minute, $Valor.Second, $Valor.Millisecond) -join ',') + ')'
+            return '([datetime]::new(' + (@($Valor.Year, $Valor.Month, $Valor.Day, $Valor.Hour, $Valor.Minute, $Valor.Second, $Valor.Millisecond) -join ',') + '))'
         }
         if ($Valor -is [int])      { return [string]$Valor }
 
@@ -1348,7 +1348,12 @@ function Show-MenuRelatorioAcesso {
         if ($r -match '^[nN]$') { return }
 
         try {
-            & $ScriptRelatorio @p
+            if ($p.Contains('PassThru') -and [bool]$p['PassThru']) {
+                & $ScriptRelatorio @p
+            }
+            else {
+                & $ScriptRelatorio @p | Out-Host
+            }
         }
         catch {
             Write-Host "Erro: $($_.Exception.Message)" -ForegroundColor Red
