@@ -340,7 +340,18 @@ public class EventoTesteDesempenho : IDisposable {
         $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 3)
         Assert-Resultado (-not $r.Caminho) "Não reutilizar contexto após evento $interrupcao"
     }
-    foreach($diferenca in @(@{ProcessId='0x21'},@{Sid='S-1-5-21-9-8-7-1001'},@{Servidor='OUTRO'},@{Handle='0x11'},@{SessaoId='0x31'},@{Segundos=400})){
+    foreach($segundos in @(601,3601)) {
+        Reset-CorrelacaoTeste
+        $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4656 1)
+        $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2 -Segundos $segundos)
+        Assert-Resultado ($r.Caminho -eq 'E:\FileServer\RH\a.txt') 'Correlacionar abertura entre dez minutos e uma hora antes'
+    }
+    Reset-CorrelacaoTeste
+    $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4656 1)
+    $script:passosCorrelacao=255
+    $r=Update-CorrelacaoExclusao (New-EventoCorrelacao 4660 2 -Segundos 3602)
+    Assert-Resultado (-not $r.Caminho -and $script:handlesExclusao.Count -eq 0) 'Limpeza periódica respeita expiração de uma hora'
+    foreach($diferenca in @(@{ProcessId='0x21'},@{Sid='S-1-5-21-9-8-7-1001'},@{Servidor='OUTRO'},@{Handle='0x11'},@{SessaoId='0x31'},@{Segundos=3602})){
         Reset-CorrelacaoTeste
         $null=Update-CorrelacaoExclusao (New-EventoCorrelacao 4656 1)
         $r=Update-CorrelacaoExclusao (New-EventoCorrelacao -Id 4660 -Record 2 @diferenca)

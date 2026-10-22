@@ -281,3 +281,10 @@ AÇÕES NOS ARQUIVOS E HISTÓRICO EM LEGACY
 - A v8 não foi alterada. Windows real e PowerShell 5.1 ainda precisam de teste.
 - Validação final: 103 verificações simuladas aprovadas no PowerShell 7.4.13;
   nenhuma validação em Windows real foi realizada nesta entrega.
+
+JANELA DE CORRELAÇÃO DE EXCLUSÃO: UMA HORA
+- Abertura 4656 pode ocorrer até 3.600 segundos antes do evento 4660.
+- Limpeza periódica do contexto usa o mesmo limite; as verificações de
+  identidade, processo, handle, fechamento e reinício permanecem.
+- A consulta precisa incluir a abertura; ampliar a tolerância não busca
+  eventos anteriores ao Inicio informado. Snapshot legacy permanece intacto.
