@@ -68,7 +68,7 @@ Para um teste curto e limitado:
     -CsvSaida "C:\Relatorios\diagnostico-{data}.csv"
 ```
 
-O limite vale antes dos filtros locais. Se for atingido, o aviso e o arquivo `.execucao.csv` indicam que a busca pode estar parcial. Remova o limite (zero) ou reduza o período para uma coleta completa.
+O limite vale antes dos filtros locais; em 4660 inclui também os cinco minutos anteriores lidos para apoio. Se for atingido, o aviso e o arquivo `.execucao.csv` indicam que a busca pode estar parcial. Remova o limite (zero) ou reduza o período para uma coleta completa.
 
 No menu, escolha o limite na opção 12. Silencioso já vem ativado para evitar tabelas enormes. ResolverSids, ResolverIP e EnriquecerAD podem depender da rede/domínio; mantenha desativados no primeiro teste. A tradução de SID agora é opcional e o identificador continua disponível.
 

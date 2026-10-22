@@ -315,3 +315,15 @@ OTIMIZAÇÃO DO FILTRO EXATO NO EVENTO 4660
   e testes do arquivo removido ajustados; não foi restaurado o script.
 - Após incorporar a remoção da v8: 130 verificações ativas aprovadas; os
   testes exclusivos do arquivo removido foram retirados junto das referências.
+
+LEITURA ANTERIOR AO PERÍODO PARA APOIO À EXCLUSÃO
+- Integrada a atualização enviada pelo usuário: em 4660, lê cinco minutos
+  antes de Inicio para localizar abertura ou DELETE que forneça o caminho.
+- Somente exclusões a partir do Inicio pedido entram no relatório. Exclusões
+  anteriores ainda invalidam/consomem handles, evitando reutilizar evidência.
+- Contagens de alvos e exclusões sem caminho não incluem a folga; progresso
+  já classifica essas linhas como apoio antes de apresentar os contadores.
+- Diagnóstico acrescenta InicioConsulta e ExclusoesAnterioresComoApoio.
+- MaxEventos inclui essa leitura adicional, portanto pode reduzir a cobertura
+  do período solicitado. Não é uma otimização de velocidade.
+- 137 verificações simuladas aprovadas; Windows real ainda precisa de teste.

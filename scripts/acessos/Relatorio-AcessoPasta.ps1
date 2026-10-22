@@ -1859,7 +1859,11 @@ if (-not [string]::IsNullOrWhiteSpace($ListaAutorizados)) {
 # Montagem do filtro XPath (aplicado direto no log)
 # ============================================================
 
-$clausulaTempo = "@SystemTime>='$(ConvertTo-XPathTime $dataInicio)'"
+# O 4660 não traz o caminho: a abertura (4656/4663) pode ter ocorrido pouco antes
+# do início do período, então os eventos de apoio são lidos com 5 min de folga.
+$inicioConsulta = $dataInicio
+if ($EventoId -eq 4660) { $inicioConsulta = $dataInicio.AddMinutes(-5) }
+$clausulaTempo = "@SystemTime>='$(ConvertTo-XPathTime $inicioConsulta)'"
 
 if ($usaFim) {
     $clausulaTempo += " and @SystemTime<='$(ConvertTo-XPathTime $dataFim)'"
@@ -1969,6 +1973,7 @@ foreach ($servidor in $Computador) {
     }
 
     # Servidor local: lê direto, sem RPC (-ComputerName só para remotos)
+    if ($EventoId -eq 4660) { Write-Host ("Apoio desde {0}; exclusões no relatório a partir de {1}." -f $inicioConsulta.ToString('dd/MM/yyyy HH:mm:ss'), $dataInicio.ToString('dd/MM/yyyy HH:mm:ss')) -ForegroundColor DarkGray }
     $parametrosLog = @{
         LogName     = 'Security'
         FilterXPath = $xpath
@@ -1987,6 +1992,7 @@ foreach ($servidor in $Computador) {
     $tempoConsulta = [Diagnostics.Stopwatch]::StartNew()
     $consultadosServidor = 0
     $eventosAlvoLidos = 0
+    $exclusoesAnterioresApoio = 0
     $eventosApoioLidos = 0
     $eventosAlvoDescartados = 0
     $falhasConversaoAntes = $falhasParse
@@ -2007,7 +2013,8 @@ foreach ($servidor in $Computador) {
                 $consultadosServidor++
                 $idEventoAtual = [int]$eventoAtual.Id
                 $dataEventoAtual = $eventoAtual.TimeCreated
-                if ($idEventoAtual -eq $EventoId) { $eventosAlvoLidos++ }
+                $alvoNoPeriodo = $idEventoAtual -eq $EventoId -and -not ($EventoId -eq 4660 -and $dataEventoAtual -lt $dataInicio)
+                if ($alvoNoPeriodo) { $eventosAlvoLidos++ }
                 else { $eventosApoioLidos++ }
                 if (($tempoConsulta.Elapsed.TotalSeconds - $ultimoProgresso) -ge 5) {
                     $ultimoProgresso = $tempoConsulta.Elapsed.TotalSeconds
@@ -2019,7 +2026,15 @@ foreach ($servidor in $Computador) {
                     if ($EventoId -eq 4660) {
                         $correlacaoAtual = Update-CorrelacaoExclusao -Evento $eventoAtual
                         $registro = $null
-                        if ($idEventoAtual -eq 4660) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
+                        if ($idEventoAtual -eq 4660) {
+                            if ($eventoAtual.TimeCreated -ge $dataInicio) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
+                            else {
+                                # Folga anterior ao período: serve só de apoio e não entra nas contagens do alvo.
+                                if (-not $correlacaoAtual.Caminho) { $exclusoesSemCaminho-- }
+                                $exclusoesAnterioresApoio++
+                                $idEventoAtual = 0
+                            }
+                        }
                     }
                     else { $registro = Convert-EventoAcesso -Evento $eventoAtual }
                 }
@@ -2113,6 +2128,7 @@ foreach ($servidor in $Computador) {
         $diagnosticoConsulta.Add([pscustomobject]@{
             Servidor = Protect-CsvCell $servidor; Estado = $estadoConsulta
             Inicio = $dataInicio.ToString('o'); Fim = $dataFim.ToString('o')
+            InicioConsulta = $inicioConsulta.ToString('o'); ExclusoesAnterioresComoApoio = $exclusoesAnterioresApoio
             EventosLidos = $consultadosServidor; Linhas = $registros.Count - $linhasAntes
             EventosAlvoLidos = $eventosAlvoLidos; EventosApoioLidos = $eventosApoioLidos
             EventosAlvoDescartados = $eventosAlvoDescartados; FalhasConversao = $falhasParse - $falhasConversaoAntes

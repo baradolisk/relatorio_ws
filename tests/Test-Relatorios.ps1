@@ -444,5 +444,52 @@ public class EventoTesteDesempenho : IDisposable {
     } finally {Remove-Item -LiteralPath $temporario -Recurse -Force; Remove-Variable -Name TesteXPathExclusaoAtual -Scope Global -ErrorAction SilentlyContinue}
 }
 
+# Leitura antecipada para correlação, sem expandir o período do relatório.
+& {
+$relatorio=Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+$inicioFolgaTeste=[datetime]::new(2026,10,22,14,40,0)
+$fimFolgaTeste=$inicioFolgaTeste.AddMinutes(1)
+function Novo-Evento {
+ param($Id,$Record,$Offset,$Handle)
+ $e=[pscustomobject]@{Id=$Id;RecordId=$Record;TimeCreated=$inicioFolgaTeste.AddSeconds($Offset);MachineName='SRV';Keywords=0x20000000000000;HandleTeste=$Handle}
+ $e|Add-Member ScriptMethod ToXml {
+  $caminho='';if($this.Id -in @(4656,4663)){$caminho='<Data Name="ObjectName">E:\Dados\a.txt</Data>'}
+  return '<Event><EventData><Data Name="SubjectUserName">teste</Data><Data Name="SubjectUserSid">S-1-5-21-1-2-3-1001</Data><Data Name="SubjectDomainName">EMPRESA</Data><Data Name="SubjectLogonId">0x30</Data><Data Name="ProcessId">0x20</Data><Data Name="HandleId">'+$this.HandleTeste+'</Data><Data Name="ObjectType">File</Data><Data Name="AccessMask">0x10000</Data>'+$caminho+'</EventData></Event>'
+ };$e
+}
+$global:FolgaTesteEventos=@(
+ (Novo-Evento 4656 1 -20 '0x10'),(Novo-Evento 4663 2 -5 '0x11'),
+ (Novo-Evento 4660 3 -2 '0x11'),(Novo-Evento 4660 4 -1 '0x99'),
+ (Novo-Evento 4660 5 1 '0x10'),(Novo-Evento 4660 6 2 '0x11'),(Novo-Evento 4660 7 3 '0x12')
+)
+function Get-WinEvent {
+ [CmdletBinding()]param($ListLog,$LogName,$MaxEvents,[switch]$Oldest,$FilterXPath,$ComputerName)
+ if($ListLog){return [pscustomobject]@{MaximumSizeInBytes=2147483648}}
+ if($Oldest -and -not $FilterXPath){return [pscustomobject]@{TimeCreated=([datetime]::new(2026,10,21))}}
+ if($FilterXPath -notmatch "@SystemTime>='([^']+)'"){throw 'Sem início'}
+ $de=[datetime]::Parse($Matches[1],[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+ if($FilterXPath -notmatch "@SystemTime<='([^']+)'"){throw 'Sem fim'}
+ $ate=[datetime]::Parse($Matches[1],[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind)
+ $eventos=@($global:FolgaTesteEventos | Where-Object {$_.TimeCreated.ToUniversalTime() -ge $de -and $_.TimeCreated.ToUniversalTime() -le $ate})
+ if($MaxEvents -gt 0){$eventos | Select-Object -First $MaxEvents}else{$eventos}
+}
+$temp=Join-Path ([IO.Path]::GetTempPath()) ('folga-'+[guid]::NewGuid().ToString('N'))
+$null=New-Item -ItemType Directory -Path $temp
+try{
+ $csv=Join-Path $temp 'saida.csv'
+ $r=@(& $relatorio -Computador SRV -EventoId 4660 -Inicio $inicioFolgaTeste -Fim $fimFolgaTeste -CsvSaida $csv -Silencioso -PassThru 3>$null 6>$null)
+ Assert-Resultado ($r.Count -eq 3) 'Folga não amplia o período das exclusões relatadas'
+ Assert-Resultado (@($r | Where-Object {$_.RecordId -lt 5}).Count -eq 0) 'Não exportar exclusões anteriores ao início'
+ Assert-Resultado (($r | Where-Object RecordId -eq 5).Objeto -eq 'E:\Dados\a.txt') 'Correlacionar abertura anterior ao início solicitado'
+ Assert-Resultado (-not ($r | Where-Object RecordId -eq 6).Objeto) 'DELETE anterior consumido não é reutilizado'
+ $d=Import-Csv -LiteralPath ($csv+'.execucao.csv') -Delimiter ';'
+ Assert-Resultado ($d.EventosAlvoLidos -eq 3 -and $d.EventosApoioLidos -eq 4 -and $d.EventosAlvoDescartados -eq 0 -and $d.ExclusoesSemCaminho -eq 2) 'Contagens não incluem exclusões anteriores como alvos'
+ Assert-Resultado (([datetime]$d.InicioConsulta) -eq $inicioFolgaTeste.AddMinutes(-5)) 'Diagnóstico informa início real da leitura'
+ Assert-Resultado ($d.ExclusoesAnterioresComoApoio -eq 2) 'Diagnóstico contabiliza exclusões anteriores usadas como apoio'
+
+}finally{Remove-Item -LiteralPath $temp -Recurse -Force;Remove-Variable FolgaTesteEventos -Scope Global}
+
+}
+
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."
 Write-Output 'Não valida integração Windows/AD/SMB, cobertura real de auditoria ou Windows PowerShell 5.1.'
