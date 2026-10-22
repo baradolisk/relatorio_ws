@@ -88,13 +88,13 @@
     Retorna os registros como objetos PowerShell.
 
 .EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
+    .\Relatorio-AcessoPasta.ps1 -Menu
 
 .EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1
+    .\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1
 
 .EXAMPLE
-    .\scripts\acessos\Relatorio-AcessoPasta.ps1 -CsvSaida "C:\Relatorios\acessos-{data}.csv"
+    .\Relatorio-AcessoPasta.ps1 -CsvSaida "C:\Relatorios\acessos-{data}.csv"
 
 .NOTES
     Veja README.md, docs/PARAMETROS.md e docs/EXEMPLOS.md para mais opções.

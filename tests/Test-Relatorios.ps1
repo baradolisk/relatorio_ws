@@ -31,7 +31,7 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
 
 # Cada conjunto usa escopo próprio para não misturar funções das versões.
 & {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'))
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-AcessoPasta.ps1'))
     Assert-Resultado ((ConvertTo-ShareServidor '\\*\z' 'SRV.empresa.local') -eq '\\SRV.empresa.local\z') 'ShareName com servidor curinga'
     Assert-Resultado (Test-FiltroRede '\\SRV\z\RH' '\\SRV.empresa.local\z' 'RH\a.txt' 'SRV.empresa.local' 'SRV') 'UNC curto e FQDN'
     Assert-Resultado (-not (Test-FiltroRede '\\OUTRO\z' '\\SRV\z' 'a.txt' 'SRV' 'SRV')) 'Servidor diferente'
@@ -40,17 +40,9 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
     Assert-Resultado ((Protect-CsvCell '=1+1') -eq "'=1+1") 'Proteção de fórmula em CSV'
 }
 
-& {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/permissoes/Relatorio-PermissoesPasta-v2.ps1'))
-    Assert-Resultado (Test-SidAmplo 'S-1-1-0') 'Everyone por SID'
-    Assert-Resultado (-not (Test-SidAmplo 'S-1-5-21-1-2-3-1001')) 'Usuário específico não é grupo amplo'
-    Assert-Resultado (Test-DireitoEscrita 2) 'Direito de escrita'
-    Assert-Resultado (-not (Test-DireitoEscrita 1)) 'Leitura não é escrita'
-}
-
 # Exercitar o menu com entradas simuladas; nenhuma consulta ao Windows.
 & {
-    $relatorio = Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+    $relatorio = Join-Path $raiz 'Relatorio-AcessoPasta.ps1'
     Invoke-Expression (Import-FuncoesTeste $relatorio)
     $global:TesteRelatoriosEntradasMenu = New-Object 'System.Collections.Generic.Queue[string]'
     $global:TesteRelatoriosMensagensMenu = New-Object 'System.Collections.Generic.List[string]'
@@ -196,7 +188,7 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
 
 # Diagnóstico de volume: simular o serviço de eventos, sem consultar Windows.
 & {
-    $relatorio = Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+    $relatorio = Join-Path $raiz 'Relatorio-AcessoPasta.ps1'
     if (-not ('EventoTesteDesempenho' -as [type])) {
         Add-Type -TypeDefinition @'
 using System;
@@ -257,7 +249,7 @@ public class EventoTesteDesempenho : IDisposable {
 
 # Ações e correlação de exclusão: não inferir novo/editado ou caminho sem evidência.
 & {
-    $relatorio = Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+    $relatorio = Join-Path $raiz 'Relatorio-AcessoPasta.ps1'
     Invoke-Expression (Import-FuncoesTeste $relatorio)
     foreach ($caso in @(
         @{Id=4663;Mask='0x80';Acao='Consulta de metadados'},
@@ -446,7 +438,7 @@ public class EventoTesteDesempenho : IDisposable {
 
 # Leitura antecipada para correlação, sem expandir o período do relatório.
 & {
-$relatorio=Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+$relatorio=Join-Path $raiz 'Relatorio-AcessoPasta.ps1'
 $inicioFolgaTeste=[datetime]::new(2026,10,22,14,40,0)
 $fimFolgaTeste=$inicioFolgaTeste.AddMinutes(1)
 function Novo-Evento {

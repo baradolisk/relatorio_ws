@@ -1,20 +1,20 @@
-# Como contribuir
+# Contribuir
 
-Abra uma issue com o script usado, versão do PowerShell, comando, erro e resultado esperado. Remova usuários, IPs e caminhos reais das amostras. Não publique credenciais ou logs de produção.
+Reporte o comando, versão do PowerShell, período, mensagem de erro e resultado esperado. Remova nomes, IPs e caminhos reais das amostras. Não publique credenciais nem logs de produção.
 
-Para propor uma correção:
+Para alterar:
 
-1. Crie uma branch e altere a versão correta: acessos ou permissões v2.
-2. Mantenha compatibilidade com PowerShell 5.1 e UTF-8 com BOM nos scripts.
-3. Atualize exemplos, documentação e testes afetados.
+1. Crie uma branch. Há apenas um relatório: `Relatorio-AcessoPasta.ps1`.
+2. Preserve compatibilidade com PowerShell 5.1 e UTF-8 com BOM.
+3. Atualize os guias e os testes afetados.
 4. Execute na raiz:
 
 ```powershell
 pwsh -NoProfile -File .\tests\Test-Relatorios.ps1
 ```
 
-5. Abra um pull request descrevendo a mudança e o que foi testado.
+5. Envie um pull request com a mudança e a validação feita.
 
-Os testes verificam funções, menu e consulta com fontes simuladas no PowerShell 7. Mudanças na coleta também precisam de teste em Windows, com log, AD e SMB reais. Zero eventos não comprova funcionamento.
+Os testes usam fontes simuladas no PowerShell 7. Alterações de coleta também precisam de teste em Windows, com log e permissões reais. Zero eventos não comprova funcionamento.
 
-Mantenha relatórios em `scripts/`, modelos em `examples/`, guias em `docs/` e testes em `tests/`. Versões anteriores ficam em `legacy/`. Ao mover arquivos, ajuste caminhos e informe a migração. A execução dos relatórios deve continuar apenas consultando dados, sem alterar auditoria ou permissões.
+Mantenha o script na raiz, guias em `docs/`, modelos em `examples/` e testes em `tests/`. Use o histórico do Git, sem criar cópias de versões no repositório. A execução do relatório deve continuar somente consultando dados.

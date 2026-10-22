@@ -5,10 +5,10 @@ Execute a partir da pasta principal do repositório. Ajuste servidores, usuário
 ## Menu interativo
 
 ```powershell
-.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
+.\Relatorio-AcessoPasta.ps1 -Menu
 
 # Abrir com valores preenchidos
-.\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu -Pasta "RH" -Dias 5
+.\Relatorio-AcessoPasta.ps1 -Menu -Pasta "RH" -Dias 5
 ```
 
 Valores iniciais do menu:
@@ -30,18 +30,18 @@ Os CSVs usam a unidade do Windows quando diferente de C:. Digite `-` no campo pa
 
 Na escolha de evento, digite `5145`, `4663`, `5140` ou `4660`; também são aceitas as opções `1`, `2`, `3` e `4`, respectivamente. Enter mantém o evento atual.
 
-As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
+As opções são as do relatório. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
 
 O progresso separa eventos do tipo selecionado e eventos de apoio, mostrando também o horário que está sendo processado. A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
 
-A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões.
+A execução não altera permissões nem habilita auditoria.
 
 ## Todas as pastas e contas
 
 Sem Pasta, consulta todas as pastas presentes nos eventos. As duas opções abaixo incluem também contas de computador e compartilhamentos administrativos:
 
 ```powershell
-.\scripts\acessos\Relatorio-AcessoPasta.ps1 `
+.\Relatorio-AcessoPasta.ps1 `
     -Dias 1 `
     -IncluirContasComputador `
     -IncluirCompartilhamentosEspeciais `
@@ -51,7 +51,7 @@ Sem Pasta, consulta todas as pastas presentes nos eventos. As duas opções abai
 
 Para vários servidores, acrescente `-Computador "SRV1","SRV2"`. Não há descoberta automática de servidores do domínio.
 
-## Usuário, período e três eventos
+## Usuário, período e quatro eventos
 
 ```powershell
 $opcoes = @{
@@ -62,22 +62,22 @@ $opcoes = @{
     Silencioso   = $true
 }
 
-foreach ($evento in 5145, 5140, 4663) {
-    .\scripts\acessos\Relatorio-AcessoPasta.ps1 @opcoes `
+foreach ($evento in 5145, 5140, 4663, 4660) {
+    .\Relatorio-AcessoPasta.ps1 @opcoes `
         -EventoId $evento `
         -CsvSaida "C:\Relatorios\detalhado-$evento-{data}.csv" `
         -CsvResumo "C:\Relatorios\resumo-$evento-{data}.csv"
 }
 ```
 
-Não combine Dias com Inicio/Fim. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas e minúsculas. Os três tipos geram arquivos separados; esses CSVs não são cruzados entre si.
+Não combine Dias com Inicio/Fim. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas e minúsculas. Cada tipo gera arquivos separados. O 4660 consulta seus eventos de apoio automaticamente; os CSVs não são cruzados entre si.
 
 ## Ações nos arquivos
 
-Use o original atualizado com evento 4663 para mostrar direitos utilizados no objeto:
+Use o evento 4663 para mostrar direitos utilizados no objeto:
 
 ```powershell
-.\scripts\acessos\Relatorio-AcessoPasta.ps1 `
+.\Relatorio-AcessoPasta.ps1 `
     -Pasta "E:\FileServer\TI\TESTES" `
     -Inicio (Get-Date).AddMinutes(-30) `
     -Fim (Get-Date) `
@@ -103,7 +103,7 @@ Para exclusões, repita com `-EventoId 4660`. No menu, é a opção de evento **
 
 Sem correlação, a exclusão aparece com caminho vazio e aviso. Com filtro de pasta, essas linhas não aparecem porque não é possível atribuí-las à pasta; a contagem fica no `.execucao.csv`. O cache tem limite de 10.000 handles; se precisar reiniciá-lo, avisa e registra a limitação.
 
-Com UsuarioExato, o usuário também é filtrado diretamente no log em modo 4660, preservando eventos de reinício e limpeza. Sem essa opção, o filtro de usuário continua após a leitura. A grafia deve coincidir com o log, incluindo maiúsculas e minúsculas. O `.execucao.csv` informa `InicioConsulta` (leitura real) e `ExclusoesAnterioresComoApoio`. MaxEventos também conta os eventos de suporte e a leitura anterior ao período e lê os primeiros em ordem cronológica; atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
+Com UsuarioExato, o usuário também é filtrado diretamente no log em modo 4660, preservando eventos de reinício e limpeza. Sem essa opção, o filtro de usuário continua após a leitura. A grafia deve coincidir com o log, incluindo maiúsculas e minúsculas. O `.execucao.csv` informa `InicioConsulta` (leitura real) e `ExclusoesAnterioresComoApoio`. No modo 4660, MaxEventos conta também o apoio anterior ao período; a leitura é cronológica e atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
 
 A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Metadados, gravação, DELETE_CHILD sozinho e DELETE com falha não alimentam a alternativa. O 4663 sozinho não confirma exclusão: é necessário o 4660 posterior. Logs ausentes, contexto inconsistente ou evidências fora do período/limite podem deixar o caminho vazio. O script não altera a política nem a SACL.
 
@@ -123,7 +123,5 @@ A implementação disponível é auxiliar: usa nome de usuário e trecho do cami
 | 4660 | Exclusão registrada; nome do objeto depende da correlação |
 
 Para preservar cada evento, gere o detalhado sem Agrupar. ConcedidoPor mostra a regra de permissão identificada, não quem configurou a pasta. Sem eventos não significa ausência de acessos.
-
-O inventário de permissões mostra regras individuais (ACEs), não a permissão efetiva de cada funcionário. Examina pastas até a profundidade escolhida, não arquivos individuais ou compartilhamentos administrativos.
 
 Proteja os CSVs: eles contêm usuários, IPs e caminhos. Eles usam separador `;`. Arquivos antigos podem permanecer quando uma consulta não encontra registros; confira data e avisos da execução.
