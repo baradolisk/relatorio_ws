@@ -153,6 +153,32 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
         $captura = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
         Assert-Resultado ($null -eq $captura.Pasta) 'Hífen remove o filtro de pasta'
         Assert-Resultado ($null -ne $captura.Inicio -and $null -eq $captura.Fim -and $null -eq $captura.Dias) 'Período aberto não inclui fim ou dias'
+        # Executar sem editar nenhuma opção deve fornecer padrões úteis.
+        foreach ($r in @('E','','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
+        $padrao = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado ($padrao.Dias -eq 1 -and $padrao.EventoId -eq 5145) 'Menu inicia com um dia e evento 5145'
+        Assert-Resultado ($padrao.Computador.Count -ge 1 -and $padrao.Computador[0]) 'Menu preenche o computador local'
+        Assert-Resultado (-not $padrao.Pasta -and -not $padrao.ListaAutorizados -and -not $padrao.ExcluirUsuarios) 'Padrões não exigem filtros ou arquivos próprios'
+        Assert-Resultado ((Split-Path -Leaf $padrao.CsvSaida) -eq 'acessos-{data}.csv') 'CSV detalhado tem caminho padrão'
+        Assert-Resultado ((Split-Path -Leaf $padrao.CsvResumo) -eq 'resumo-{data}.csv') 'CSV resumo tem caminho padrão'
+        Assert-Resultado ($null -eq $padrao.Inicio -and $null -eq $padrao.Fim) 'Data sugerida não muda o modo de dias'
+
+        # Trocar para período aceita Enter em início e fim, sem obrigar digitação.
+        $antesPeriodo = (Get-Date).AddDays(-3).AddMinutes(-1)
+        foreach ($r in @('3','2','','','E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{Dias=3}
+        $padrao = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado (([datetime]$padrao.Inicio) -ge $antesPeriodo -and ([datetime]$padrao.Inicio) -le (Get-Date).AddDays(-3).AddMinutes(1)) 'Data inicial sugerida acompanha Dias'
+        Assert-Resultado ($null -eq $padrao.Fim -and $null -eq $padrao.Dias) 'Fim padrão é até agora sem misturar Dias'
+
+        # Permitir desativar arquivos e preservar opção de usuário exato com Enter.
+        foreach ($r in @('9','-','10','-','5','','','E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo -ParametrosIniciais @{Usuario='joao'; UsuarioExato=$true}
+        $padrao = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado (-not $padrao.CsvSaida -and -not $padrao.CsvResumo) 'Usuário pode desativar os CSVs padrão'
+        Assert-Resultado ($padrao.Usuario -eq 'joao' -and $padrao.UsuarioExato.IsPresent) 'Enter preserva usuário e opção de nome exato'
+
         # O uso antigo por parâmetros não deve abrir o menu.
         function Get-WinEvent {
             [CmdletBinding()]

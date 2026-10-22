@@ -9,7 +9,7 @@
     Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
 .PARAMETER Menu
-    Abre o menu interativo. Omita em tarefas agendadas.
+    Abre o menu com valores sugeridos e exportação CSV. Omita em tarefas agendadas.
 
 .PARAMETER Pasta
     Nome, trecho ou caminho da pasta. Omita para pesquisar todas.
@@ -944,23 +944,31 @@ function Show-MenuRelatorioAcesso {
     }
 
     # ============================================================
-    # Configuração atual (valores iniciais = padrões do script original)
+    # Valores iniciais do menu; não alteram os padrões da linha de comando.
     # ============================================================
 
+    $agoraMenu = Get-Date
+    # No Windows, usa a unidade do sistema (normalmente C:\Relatorios).
+    $raizSaida = [IO.Path]::GetTempPath()
+    if ($env:SystemDrive) { $raizSaida = $env:SystemDrive + '\' }
+    $pastaSaida = Join-Path $raizSaida 'Relatorios'
+
+    $computadorPadrao = [Environment]::MachineName
+    if ($env:COMPUTERNAME) { $computadorPadrao = $env:COMPUTERNAME }
     $cfg = [ordered]@{
-        Computador       = @($env:COMPUTERNAME)
+        Computador       = @($computadorPadrao)
         EventoId         = 5145
         UsaPeriodo       = $false
         Dias             = 1
-        Inicio           = $null
+        Inicio           = $agoraMenu.AddDays(-1)
         Fim              = $null
         Pasta            = ''
         Usuario          = '*'
         UsuarioExato     = $false
         Resultado        = 'Todos'
         ExcluirUsuarios  = @()
-        CsvSaida         = ''
-        CsvResumo        = ''
+        CsvSaida         = Join-Path $pastaSaida 'acessos-{data}.csv'
+        CsvResumo        = Join-Path $pastaSaida 'resumo-{data}.csv'
         ListaAutorizados = ''
     }
 
@@ -985,6 +993,7 @@ function Show-MenuRelatorioAcesso {
     $cfg.Computador = @($cfg.Computador)
     $cfg.ExcluirUsuarios = @($cfg.ExcluirUsuarios)
     $cfg.UsaPeriodo = $ParametrosIniciais.ContainsKey('Inicio')
+    if (-not $cfg.UsaPeriodo) { $cfg.Inicio = $agoraMenu.AddDays(-[int]$cfg.Dias) }
 
     $descEvento = @{
         5145 = '5145 - Verificação de acesso SMB [padrão]'
@@ -1056,9 +1065,12 @@ function Show-MenuRelatorioAcesso {
         while ($true) {
 
             $textoAtual = ''
-            if ($null -ne $Atual) { $textoAtual = $Atual.ToString('dd/MM/yyyy HH:mm') }
-
-            $r = Read-Texto $Pergunta $textoAtual
+            if ($null -ne $Atual) { $textoAtual = $Atual.ToString('dd/MM/yyyy HH:mm:ss') }
+            if ($null -eq $Atual -and $Opcional) {
+                $r = Read-Host "$Pergunta [até agora]"
+                if ([string]::IsNullOrWhiteSpace($r) -or $r.Trim() -eq '-') { return $null }
+            }
+            else { $r = Read-Texto $Pergunta $textoAtual }
 
             if ([string]::IsNullOrWhiteSpace($r)) {
 
@@ -1122,6 +1134,8 @@ function Show-MenuRelatorioAcesso {
 
             $cfg.UsaPeriodo = $false
             $cfg.Dias = Read-Inteiro 'Quantos dias para trás' $cfg.Dias 1 3650
+            $cfg.Inicio = (Get-Date).AddDays(-$cfg.Dias)
+            $cfg.Fim = $null
         }
         elseif ($r -eq '2') {
 
@@ -1164,13 +1178,17 @@ function Show-MenuRelatorioAcesso {
 
         $cfg.Usuario = $r
 
+        $exatoAnterior = [bool]$cfg.UsuarioExato
         $cfg.UsuarioExato = $false
 
         if ($r -notmatch '[\*\?\[\]\\"'']') {
 
-            $exato = Read-Host 'Filtrar direto no log (mais rápido, diferencia maiúsculas/minúsculas)? (S/N) [N]'
-
-            if ($exato -match '^[sSyY]') { $cfg.UsuarioExato = $true }
+            $padraoExato = 'N'
+            if ($exatoAnterior) { $padraoExato = 'S' }
+            do { $exato = (Read-Host "Nome exato no log? Diferencia maiúsculas/minúsculas (S/N) [$padraoExato]").Trim() }
+            while ($exato -notmatch '^(?:[sSnN])?$')
+            if (-not $exato) { $cfg.UsuarioExato = $exatoAnterior }
+            else { $cfg.UsuarioExato = $exato -match '^[sS]$' }
         }
     }
 
@@ -1224,9 +1242,10 @@ function Show-MenuRelatorioAcesso {
 
             foreach ($n in (ConvertTo-Lista $r)) {
 
-                if ($n -match '^\d+$' -and [int]$n -ge 1 -and [int]$n -le $chaves.Count) {
+                $indice = 0
+                if ([int]::TryParse($n, [ref]$indice) -and $indice -ge 1 -and $indice -le $chaves.Count) {
 
-                    $k = $chaves[[int]$n - 1]
+                    $k = $chaves[$indice - 1]
                     $opcoes[$k].Ativo = -not $opcoes[$k].Ativo
                 }
             }
@@ -1386,16 +1405,17 @@ function Show-MenuRelatorioAcesso {
         if ($cfg.Pasta) { $textoPasta = $cfg.Pasta } else { $textoPasta = '(todas)' }
 
         $textoUsuario = $cfg.Usuario
+        if ($cfg.Usuario -eq '*') { $textoUsuario = '(todos)' }
         if ($cfg.UsuarioExato) { $textoUsuario += ' (exato)' }
 
         if ($cfg.ExcluirUsuarios.Count -gt 0) { $textoExcluir = $cfg.ExcluirUsuarios -join ', ' } else { $textoExcluir = '(nenhum)' }
 
         $ativas = @($opcoes.Keys | Where-Object { $opcoes[$_].Ativo })
-        if ($ativas.Count -gt 0) { $textoOpcoes = $ativas -join ', ' } else { $textoOpcoes = '(nenhuma)' }
+        if ($ativas.Count -gt 0) { $textoOpcoes = $ativas -join ', ' } else { $textoOpcoes = '(todas desativadas)' }
 
         if ($cfg.CsvSaida)         { $textoCsv = $cfg.CsvSaida }         else { $textoCsv = '(não exporta)' }
         if ($cfg.CsvResumo)        { $textoResumo = $cfg.CsvResumo }     else { $textoResumo = '(não exporta)' }
-        if ($cfg.ListaAutorizados) { $textoAut = $cfg.ListaAutorizados } else { $textoAut = '(não usa)' }
+        if ($cfg.ListaAutorizados) { $textoAut = $cfg.ListaAutorizados } else { $textoAut = '(desativada; requer seu CSV)' }
 
         Write-Host '============================================================' -ForegroundColor DarkGray
         Write-Host ' RELATÓRIO DE AUDITORIA DE ACESSOS - MENU' -ForegroundColor Cyan
@@ -1413,7 +1433,8 @@ function Show-MenuRelatorioAcesso {
         Write-Host "11) Lista de autorizados  : $textoAut"
         Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host ' E) Executar relatório      Q) Sair'
-        Write-Host ' Enter mantém o valor; - limpa um filtro ou caminho.'
+        Write-Host ' Pronto para executar. Altere somente o que precisar.'
+        Write-Host ' Enter mantém o valor; - limpa um filtro/caminho ou desativa um CSV.'
         if ($cfg.ListaAutorizados) { Write-Host ' Autorização por grupos: prefira a v8 para classificação por SID.' -ForegroundColor Yellow }
         Write-Host '============================================================' -ForegroundColor DarkGray
     }

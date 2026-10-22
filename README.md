@@ -27,7 +27,7 @@ Se o Windows bloquear o arquivo, consulte [como desbloquear](docs/SOLUCAO-DE-PRO
 .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Menu
 ```
 
-Escolha pasta, usuário, período e arquivos de saída. **E** executa; **Q** sai.
+O menu já vem com o último dia, todas as pastas/usuários e dois CSVs em `C:\Relatorios` (na unidade do Windows). Altere somente o que precisar. **E** executa; **Q** sai.
 Enter mantém o valor; `-` limpa um filtro ou caminho. O menu mostra o comando equivalente antes de executar.
 
 O menu está no relatório original. Para tarefas agendadas, continue usando os parâmetros sem `-Menu`.

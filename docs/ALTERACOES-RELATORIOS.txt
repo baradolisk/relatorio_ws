@@ -222,3 +222,14 @@ REVISÃO DA ATUALIZAÇÃO ENVIADA PELO USUÁRIO
   de interpretação da data no comando exibido pela versão anterior.
 - Versão final: 38 verificações simuladas aprovadas no PowerShell 7.4.13.
 - Sem alterações na coleta dos logs. Windows real e PowerShell 5.1 não testados.
+
+VALORES PADRÃO NO MENU
+- Computador local, evento 5145, último dia, todas as pastas e usuários.
+- CSVs detalhado e resumo preenchidos em Relatorios na unidade do Windows.
+- Data inicial sugerida ao escolher período; fim padrão até agora.
+- Lista de autorizados desativada até informar arquivo próprio; demais opções
+  desativadas por padrão. Usuário pode alterar ou remover os valores.
+- Enter preserva também a opção de nome exato; hífen desativa CSVs.
+- Valores explícitos passados com -Menu prevalecem. Sem -Menu, os padrões
+  e a execução anteriores continuam iguais, conforme escolha do usuário.
+- 48 verificações simuladas aprovadas; Windows real ainda não validado.
