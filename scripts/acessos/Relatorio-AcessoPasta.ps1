@@ -6,6 +6,7 @@
     Execute no Windows com acesso aos dados consultados. Exemplos partem da raiz do repositório.
     5145: verificação SMB; não comprova leitura do conteúdo.
     5140: conexão ao compartilhamento. 4663: direito auditado no objeto; exige SACL.
+    4660: exclusão; caminho correlacionado quando há ciclo de handle disponível.
     Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
 .PARAMETER MaxEventos
@@ -30,7 +31,7 @@
     Data e hora final. Com Inicio, o padrão é até agora.
 
 .PARAMETER EventoId
-    Um evento por execução: 5145 (padrão), 5140 ou 4663.
+    Um evento por execução: 5145 (padrão), 5140, 4663 ou 4660 (exclusões).
 
 .PARAMETER Usuario
     Nome ou padrão do usuário. Exemplo: "joao*". Padrão: todos.
@@ -117,7 +118,7 @@ param (
     [Parameter(ParameterSetName = 'Periodo')]
     [datetime]$Fim,
 
-    [ValidateSet(4663, 5145, 5140)]
+    [ValidateSet(4663, 5145, 5140, 4660)]
     [int]$EventoId = 5145,
 
     [ValidateNotNullOrEmpty()]
@@ -568,6 +569,7 @@ function Test-LogSeguranca {
         # GUIDs das subcategorias (independem do idioma do Windows)
         switch ($EventoId) {
             4663 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
+            4660 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
             5145 { $guid = '{0CCE9244-69AE-11D9-BED3-505054503030}' }
             5140 { $guid = '{0CCE9224-69AE-11D9-BED3-505054503030}' }
         }
@@ -659,24 +661,131 @@ function Test-FiltroRede {
     return ($alvo -ieq $restante -or $alvo.StartsWith($restante + '\', [StringComparison]::OrdinalIgnoreCase))
 }
 
+# Classificação conservadora: máscara de gravação não distingue criação de edição.
+function Get-AcaoEvento {
+    param ([int]$Id, [string]$Mask, [string]$Resultado, [bool]$CaminhoCorrelacionado = $false)
+    if ($Id -eq 4660) {
+        if ($Resultado -eq 'Falha') { return @{Acao='Exclusão não confirmada';Evidencia='4660 com indicação de falha; não confirmar exclusão.'} }
+        if ($CaminhoCorrelacionado) {
+            return @{Acao='Exclusão confirmada'; Evidencia='4660 confirma exclusão; caminho associado ao 4656 no mesmo ciclo de handle.'}
+        }
+        return @{Acao='Exclusão registrada; caminho não identificado'; Evidencia='4660 confirma exclusão, mas não traz nome. Sem ciclo de handle completo para associar caminho.'}
+    }
+    if ($Id -eq 5140) {
+        return @{Acao='Conexão ao compartilhamento'; Evidencia='5140 não informa a operação em cada arquivo.'}
+    }
+    $m = ConvertTo-AccessMask $Mask
+    if ($null -eq $m) { return @{Acao='Não identificada';Evidencia="Evento $Id com máscara ausente ou inválida."} }
+    $acoes = New-Object 'System.Collections.Generic.List[string]'
+    if ($m -band 0x2) { $acoes.Add('Gravação ou criação') }
+    if ($m -band 0x4) { $acoes.Add('Anexação ou criação de subpasta') }
+    if ($m -band 0x10000) { $acoes.Add('Direito de exclusão') }
+    if ($m -band 0x40) { $acoes.Add('Direito de excluir filhos') }
+    if ($m -band 0x40000) { $acoes.Add('Alteração de permissões') }
+    if ($m -band 0x80000) { $acoes.Add('Alteração de proprietário') }
+    if ($m -band 0x1) { $acoes.Add('Leitura ou listagem') }
+    if ($m -band (0x10 -bor 0x100)) { $acoes.Add('Gravação de atributos') }
+    if ($m -band 0x20) { $acoes.Add('Execução ou travessia') }
+    if ($acoes.Count -eq 0 -and $m -ne 0 -and ($m -band (-bnot (0x8 -bor 0x80 -bor 0x20000 -bor 0x100000))) -eq 0) {
+        $acoes.Add('Consulta de metadados')
+    }
+    if ($acoes.Count -eq 0) { $acoes.Add('Outros direitos; ver AccessMask') }
+    if ($m -band (-bnot 0x1F01FF)) { $acoes.Add('Bits adicionais; ver AccessMask') }
+    $acao = $acoes -join '; '
+    $evidencia = "4663: direitos utilizados no objeto; máscara $Mask. Gravação não distingue novo de editado; exclusão requer 4660."
+    if ($Id -eq 5145) {
+        $acao = 'Verificação SMB: ' + $acao
+        $evidencia = "5145: direitos verificados, não comprova operação nem leitura do conteúdo; máscara $Mask."
+    }
+    if ($Resultado -eq 'Falha') { $acao = 'Falha: ' + $acao }
+    return @{Acao=$acao; Evidencia=$evidencia}
+}
+
+function Get-ChaveHandle {
+    param ($Evento, [hashtable]$Dados)
+    $partes = @(([string]$Evento.MachineName).ToLowerInvariant(), [string]$Dados.SubjectUserSid)
+    if (-not $partes[0] -or $partes[1] -notmatch '^S-1-') { return '' }
+    foreach ($nome in @('SubjectLogonId','ProcessId','HandleId')) {
+        $valor = [string]$Dados[$nome]
+        if (-not $valor) { return '' }
+        try {
+            if ($valor -match '^0x') { $numero = [Convert]::ToUInt64($valor.Substring(2),16) }
+            else { $numero = [Convert]::ToUInt64($valor,10) }
+            if ($numero -eq 0) { return '' }
+            $partes += $numero.ToString([Globalization.CultureInfo]::InvariantCulture)
+        } catch { return '' }
+    }
+    return $partes -join '|'
+}
+
+function Update-CorrelacaoExclusao {
+    param ($Evento)
+    $id = [int]$Evento.Id
+    if ($id -in @(4608,4609,1102)) { $script:handlesExclusao.Clear(); return $null }
+    $xml = [xml]$Evento.ToXml()
+    $dados = @{}
+    foreach ($item in $xml.Event.EventData.Data) { if ($item.Name) { $dados[[string]$item.Name] = [string]$item.'#text' } }
+    $chave = Get-ChaveHandle $Evento $dados
+    $caminho = ''; $abertura = ''
+    # Consulta em ordem crescente; falha de ordenação invalida todo o contexto.
+    if ($script:ultimoRecordCorrelacao -ge [long]$Evento.RecordId) { $script:handlesExclusao.Clear() }
+    $script:ultimoRecordCorrelacao = [long]$Evento.RecordId
+    $script:passosCorrelacao++
+    if (($script:passosCorrelacao % 256) -eq 0) {
+        foreach ($k in @($script:handlesExclusao.Keys)) {
+            if (($Evento.TimeCreated - $script:handlesExclusao[$k].Inicio).TotalSeconds -gt 300) { $script:handlesExclusao.Remove($k) }
+        }
+    }
+    if ($chave) {
+        if ($id -eq 4656) {
+            $script:handlesExclusao.Remove($chave)
+            if (-not ($Evento.Keywords -band 0x10000000000000) -and $dados.ObjectName -and $dados.ObjectType -eq 'File') {
+                if ($script:handlesExclusao.Count -ge 10000) {
+                    $script:handlesExclusao.Clear()
+                    $script:descartesCorrelacao++
+                }
+                $script:handlesExclusao[$chave] = @{Caminho=$dados.ObjectName;Inicio=$Evento.TimeCreated;RecordId=$Evento.RecordId}
+            }
+        }
+        elseif ($id -eq 4658) { $script:handlesExclusao.Remove($chave) }
+        elseif ($script:handlesExclusao.ContainsKey($chave)) {
+            $estado = $script:handlesExclusao[$chave]
+            $segundos = ($Evento.TimeCreated - $estado.Inicio).TotalSeconds
+            if ($segundos -lt 0 -or $segundos -gt 300 -or
+                ($id -eq 4663 -and $dados.ObjectName -and $dados.ObjectName -ine $estado.Caminho)) {
+                $script:handlesExclusao.Remove($chave)
+            }
+            elseif ($id -eq 4660) { $caminho=$estado.Caminho; $abertura=[string]$estado.RecordId }
+        }
+        if ($id -eq 4660) { $script:handlesExclusao.Remove($chave) }
+    }
+    if ($id -eq 4660) {
+        if (-not $caminho) { $script:exclusoesSemCaminho++ }
+        return @{Caminho=$caminho;RecordIdAbertura=$abertura;Dados=$dados}
+    }
+    return $null
+}
+
 # Converte um evento do log em um registro de acesso.
 # Retorna $null quando o evento é filtrado ou não pôde ser processado.
 function Convert-EventoAcesso {
 
     param (
         [Parameter(Mandatory = $true)]
-        $Evento
+        $Evento,
+        [hashtable]$Correlacao
     )
 
     $script:totalLidos++
 
     try {
 
-        $xml = [xml]$Evento.ToXml()
-
+        $xml = $null
         $dado = @{}
+        if ($Correlacao) { $dado = $Correlacao.Dados }
+        else { $xml = [xml]$Evento.ToXml() }
 
-        foreach ($d in $xml.Event.EventData.Data) {
+        foreach ($d in $(if ($xml) { $xml.Event.EventData.Data })) {
 
             if ($null -ne $d.Name) {
                 $dado[$d.Name] = $d.'#text'
@@ -698,6 +807,14 @@ function Convert-EventoAcesso {
 
 
         switch ($EventoId) {
+
+            4660 {
+                if ($Correlacao) { $objeto = [string]$Correlacao.Caminho; $caminhoLocal = $objeto }
+                $acesso = 'Exclusão registrada (4660)'
+                $processo = [string]$dado['ProcessName']
+                $processId = [string]$dado['ProcessId']
+                $handleId = [string]$dado['HandleId']
+            }
 
             # Evento 4663 - acesso efetivo a arquivo/pasta
             4663 {
@@ -824,16 +941,17 @@ function Convert-EventoAcesso {
             -Relativo $caminhoRelativo -ServidorEvento $Evento.MachineName -ServidorConsulta $servidor
         # 4663 contém apenas ObjectName local: a tradução depende do inventário SMB.
         $correspondeTraducao = $false
-        if ($EventoId -eq 4663 -and $pastaLocalTraduzida) {
+        if ($EventoId -in @(4663,4660) -and $pastaLocalTraduzida) {
             $correspondeTraducao = $caminhoLocal -ieq $pastaLocalTraduzida -or
                 $caminhoLocal.StartsWith($pastaLocalTraduzida + '\', [StringComparison]::OrdinalIgnoreCase)
         }
-        if (-not $correspondeObjeto -and -not $correspondeLocal -and -not $correspondeRede -and -not $correspondeTraducao) {
+        $exclusaoSemFiltro = $EventoId -eq 4660 -and [string]::IsNullOrWhiteSpace($Pasta)
+        if (-not $exclusaoSemFiltro -and -not $correspondeObjeto -and -not $correspondeLocal -and -not $correspondeRede -and -not $correspondeTraducao) {
             return $null
         }
 
         # Descarta acessos que são só "ruído" (opcional)
-        if ($IgnorarAtributos -and $EventoId -ne 5140 -and (Test-AcessoRuido $dado['AccessMask'])) {
+        if ($IgnorarAtributos -and $EventoId -notin @(5140,4660) -and (Test-AcessoRuido $dado['AccessMask'])) {
             $script:ignoradosRuido++
             return $null
         }
@@ -892,6 +1010,9 @@ function Convert-EventoAcesso {
             -CaminhoLocal $caminhoLocal
 
 
+        $classificacao = Get-AcaoEvento -Id $EventoId -Mask ([string]$dado['AccessMask']) -Resultado $resultadoAcesso -CaminhoCorrelacionado ([bool]($Correlacao -and $Correlacao.Caminho))
+        $idAbertura = ''
+        if ($Correlacao) { $idAbertura = [string]$Correlacao.RecordIdAbertura }
         return [PSCustomObject]@{
 
             DataHora         = $Evento.TimeCreated
@@ -926,6 +1047,9 @@ function Convert-EventoAcesso {
             Departamento     = ''
             Cargo            = ''
             Autorizacao      = ''
+            Acao             = $classificacao.Acao
+            Evidencia        = $classificacao.Evidencia
+            RecordIdAbertura  = $idAbertura
         }
 
     }
@@ -1015,6 +1139,7 @@ function Show-MenuRelatorioAcesso {
         5145 = '5145 - Verificação de acesso SMB [padrão]'
         4663 = '4663 - Uso de direito no objeto (exige SACL)'
         5140 = '5140 - Conexão a um compartilhamento'
+        4660 = '4660 - Exclusão (caminho depende de correlação)'
     }
 
 
@@ -1128,8 +1253,9 @@ function Show-MenuRelatorioAcesso {
         Write-Host '  1) ' $descEvento[5145]
         Write-Host '  2) ' $descEvento[4663]
         Write-Host '  3) ' $descEvento[5140]
+        Write-Host '  4) ' $descEvento[4660]
 
-        $eventosMenu = @{'1'=5145; '2'=4663; '3'=5140; '5145'=5145; '4663'=4663; '5140'=5140}
+        $eventosMenu = @{'1'=5145; '2'=4663; '3'=5140; '5145'=5145; '4663'=4663; '5140'=5140; '4'=4660; '4660'=4660}
         while ($true) {
             $r = (Read-Host "Digite a opção ou o ID do evento [$($cfg.EventoId)]; Enter mantém").Trim()
             if ([string]::IsNullOrWhiteSpace($r)) { return }
@@ -1137,7 +1263,7 @@ function Show-MenuRelatorioAcesso {
                 $cfg.EventoId = $eventosMenu[$r]
                 return
             }
-            Write-Host 'Evento inválido. Use 5145, 4663 ou 5140 (ou as opções 1, 2 e 3).' -ForegroundColor Yellow
+            Write-Host 'Evento inválido. Use 5145, 4663, 5140 ou 4660 (ou as opções 1 a 4).' -ForegroundColor Yellow
         }
     }
 
@@ -1695,13 +1821,16 @@ if ($usaFim) {
 }
 
 $condicoesSistema = "(EventID=$EventoId)"
+if ($EventoId -eq 4660) {
+    $condicoesSistema = '(EventID=4660 or EventID=4656 or EventID=4658 or EventID=4663 or EventID=4608 or EventID=4609 or EventID=1102)'
+}
 
 # Palavras-chave de auditoria: Falha = 0x10000000000000, Êxito = 0x20000000000000
 # (mesma sintaxe band() das exibições personalizadas do Visualizador de Eventos)
-if ($Resultado -eq 'Falha') {
+if ($EventoId -ne 4660 -and $Resultado -eq 'Falha') {
     $condicoesSistema += ' and band(Keywords,4503599627370496)'
 }
-elseif ($Resultado -eq 'Exito') {
+elseif ($EventoId -ne 4660 -and $Resultado -eq 'Exito') {
     $condicoesSistema += ' and band(Keywords,9007199254740992)'
 }
 
@@ -1714,7 +1843,7 @@ $filtroUsuarioNoLog = $false
 # Se houver aspas ou "\" no nome, o filtro fica apenas no PowerShell para evitar
 # incompatibilidades com o subconjunto XPath aceito pelo Event Log.
 if (
-    $UsuarioExato -and
+    $EventoId -ne 4660 -and $UsuarioExato -and
     $Usuario -notmatch '[\*\?\[\]\\]' -and
     $Usuario -notmatch '["'']'
 ) {
@@ -1741,8 +1870,13 @@ $indiceGrupos = @{}
 $diagnosticoConsulta = New-Object 'System.Collections.Generic.List[object]'
 
 foreach ($servidor in $Computador) {
+    $handlesExclusao = @{}
+    $ultimoRecordCorrelacao = 0L
+    $passosCorrelacao = 0
+    $descartesCorrelacao = 0
+    $exclusoesSemCaminho = 0
     $pastaLocalTraduzida = ''
-    if ($EventoId -eq 4663 -and $Pasta -match '^\\\\([^\\]+)\\([^\\]+)(.*)$') {
+    if ($EventoId -in @(4663,4660) -and $Pasta -match '^\\\\([^\\]+)\\([^\\]+)(.*)$') {
         $hostFiltro = $Matches[1]; $nomeShare = $Matches[2]; $subcaminho = $Matches[3]
         if ($hostFiltro -ieq $servidor -or
             (($hostFiltro -notlike '*.*' -or $servidor -notlike '*.*') -and
@@ -1751,7 +1885,7 @@ foreach ($servidor in $Computador) {
             if ($shareFiltro.Count -eq 1 -and $shareFiltro[0].Path) {
                 $pastaLocalTraduzida = ([string]$shareFiltro[0].Path).TrimEnd('\') + $subcaminho.TrimEnd('\')
             } else {
-                Write-Warning "Não foi possível traduzir '$Pasta' para o caminho local no servidor '$servidor'. Para 4663 use o caminho absoluto, por exemplo E:\FileServer, ou confira o inventário SMB."
+                Write-Warning "Não foi possível traduzir '$Pasta' para o caminho local no servidor '$servidor'. Para 4663/4660 use o caminho absoluto, por exemplo E:\FileServer, ou confira o inventário SMB."
             }
         }
     }
@@ -1796,6 +1930,10 @@ foreach ($servidor in $Computador) {
         $parametrosLog.ComputerName = $servidor
     }
 
+    if ($EventoId -eq 4660) {
+        $parametrosLog.Oldest = $true
+        Write-Host 'Correlacionando exclusões em ordem cronológica; inclui eventos de suporte. Sem correlação, o caminho fica vazio.' -ForegroundColor DarkGray
+    }
     if ($MaxEventos -gt 0) { $parametrosLog.MaxEvents = $MaxEventos }
     $tempoConsulta = [Diagnostics.Stopwatch]::StartNew()
     $consultadosServidor = 0
@@ -1819,7 +1957,14 @@ foreach ($servidor in $Computador) {
                     Write-Progress -Id 1 -Activity "Consulta em $servidor" -Status $status
                     Write-Host $status -ForegroundColor DarkGray
                 }
-                try { $registro = Convert-EventoAcesso -Evento $eventoAtual }
+                try {
+                    if ($EventoId -eq 4660) {
+                        $correlacaoAtual = Update-CorrelacaoExclusao -Evento $eventoAtual
+                        $registro = $null
+                        if ([int]$eventoAtual.Id -eq 4660) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
+                    }
+                    else { $registro = Convert-EventoAcesso -Evento $eventoAtual }
+                }
                 finally {
                     if ($eventoAtual -is [IDisposable]) { $eventoAtual.Dispose() }
                 }
@@ -1836,7 +1981,7 @@ foreach ($servidor in $Computador) {
                         $registro.LogonId,
                         $registro.IP,
                         $registro.Porta,
-                        $registro.Objeto,
+                        ($registro.Objeto + '|' + $registro.RecordIdAbertura + '|' + $registro.HandleId),
                         $registro.Acesso,
                         $registro.AccessMask,
                         $registro.ProcessId,
@@ -1899,6 +2044,8 @@ foreach ($servidor in $Computador) {
             $estadoConsulta = 'Limite atingido; cobertura possivelmente parcial'
             Write-Warning "[$servidor] Limite de $MaxEventos eventos atingido ANTES dos filtros. Resultado pode ser parcial; use zero para consultar sem limite."
         }
+        if ($exclusoesSemCaminho -gt 0) { Write-Warning "[$servidor] $exclusoesSemCaminho exclusões sem caminho correlacionado; com filtro de pasta, essas exclusões não aparecem." }
+        if ($descartesCorrelacao -gt 0) { Write-Warning "[$servidor] Contexto de correlação reiniciado por limite de memória; alguns caminhos podem ficar não identificados." }
         Write-Host "[$servidor] $consultadosServidor eventos lidos; $($registros.Count - $linhasAntes) linhas; tempo $($tempoConsulta.Elapsed)."
         $diagnosticoConsulta.Add([pscustomobject]@{
             Servidor = Protect-CsvCell $servidor; Estado = $estadoConsulta
@@ -1907,6 +2054,7 @@ foreach ($servidor in $Computador) {
             Limite = $MaxEventos; Segundos = [math]::Round($tempoConsulta.Elapsed.TotalSeconds, 2)
             Usuario = Protect-CsvCell $Usuario; UsuarioExato = [bool]$UsuarioExato
             FiltroUsuarioNoLog = $filtroUsuarioNoLog
+            ExclusoesSemCaminho = $exclusoesSemCaminho; DescartesCorrelacao = $descartesCorrelacao
         })
     }
 }
@@ -2274,7 +2422,7 @@ if (-not $Silencioso) {
         $colunas += 'Estacao'
     }
 
-    $colunas += 'Acesso', 'Objeto'
+    $colunas += 'Acao', 'Acesso', 'Objeto'
 
     if ($regrasAutorizacao.Count -gt 0) {
         $colunas += 'Autorizacao'
@@ -2347,6 +2495,9 @@ if (-not [string]::IsNullOrWhiteSpace($CsvSaida)) {
                     Departamento     = Protect-CsvCell $_.Departamento
                     Cargo            = Protect-CsvCell $_.Cargo
                     Autorizacao      = $_.Autorizacao
+                    Acao             = Protect-CsvCell $_.Acao
+                    Evidencia        = Protect-CsvCell $_.Evidencia
+                    RecordIdAbertura  = $_.RecordIdAbertura
                 }
             } |
             Export-Csv `
@@ -2434,6 +2585,8 @@ if (-not [string]::IsNullOrWhiteSpace($CsvResumo)) {
                     ConcedidoPor   = Protect-CsvCell ($razoes -join '; ')
                     PermissaoAmpla = $ampla
                     Autorizacao    = $autorizacao
+                    Acoes          = Protect-CsvCell (($g.Acao | Sort-Object -Unique) -join ' | ')
+                    Evidencias     = Protect-CsvCell (($g.Evidencia | Sort-Object -Unique) -join ' | ')
                 }
             }
         )

@@ -17,7 +17,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 | `Dias` | Dias anteriores, 1 a 3650; padrão 1. Não combinar com Inicio/Fim. |
 | `Inicio` | Início de janela específica; obrigatório quando se usa o conjunto de parâmetros de período. |
 | `Fim` | Fim da janela; com Inicio, padrão até o momento da execução. |
-| `EventoId` | Um dos valores 5145, 5140 ou 4663; padrão 5145. |
+| `EventoId` | Um dos valores 5145, 5140, 4663 ou 4660; padrão 5145. 4660 inclui eventos de suporte para correlacionar o caminho. |
 | `Usuario` | Nome ou padrão com curingas; aceita DOMINIO\usuario; padrão `*`. |
 | `UsuarioExato` | Ativa filtro otimizado por nome exato no log, sensível à caixa, quando o nome permite. Não recebe texto. |
 | `Computador` | Um ou mais servidores: `"SRV1","SRV2"`; padrão computador local. |
@@ -52,6 +52,8 @@ Possui os parâmetros do original, exceto `Menu`, `MaxEventos` e `ResolverSids`,
 | --- | --- |
 | `ServidorAD` | Servidor/controlador/domínio para consulta inicial ao AD. |
 | `CsvCobertura` | Caminho de cobertura por servidor; se omitido com CsvSaida, usa `<CsvSaida>.cobertura.csv`. |
+
+A v8 aceita somente os eventos 5145, 5140 e 4663; não inclui as novas colunas de ações.
 
 Na v8, a lista de autorizados exige caminhos completos; correspondência de raiz
 ou descendente, sem curingas. Consulta grupos por SID e trata falhas como

@@ -36,8 +36,9 @@ A auditoria começa após habilitada; não cria registros retroativos.
 | --- | --- |
 | 5140 | Auditar Compartilhamento de Arquivos (File Share); registra conexão ao compartilhamento |
 | 4663 | Auditar Sistema de Arquivos (File System) e SACL na pasta/arquivo para os usuários e direitos desejados |
+| 4660 | File System e SACL de exclusão; para associar caminho, o relatório precisa também de 4656 e usa 4658 quando disponível |
 
-Para a SACL, abra **Propriedades da pasta → Segurança → Avançado → Auditoria**. Confira herança e escopo num teste controlado. Habilitar só a política não basta.
+Para a SACL, abra **Propriedades da pasta → Segurança → Avançado → Auditoria**. Confira herança e escopo num teste controlado. Habilitar só a política não basta. Para o teste de criação/edição/exclusão, audite criar arquivos/gravar dados, criar pastas/anexar dados, excluir e excluir subpastas/arquivos. Para os fechamentos 4658, configure também Handle Manipulation conforme a política da empresa.
 
 ## Aumentar o log para 2 GB
 

@@ -57,6 +57,17 @@ Na v8, use caminhos completos nas regras. Para filtrar por rede, use o nome que 
 
 `z` é um exemplo de nome de compartilhamento. Confira os nomes reais com `Get-SmbShare | Select-Object Name, Path`.
 
+## Ver o que o usuário fez
+
+No relatório original, o CSV detalhado inclui **Acao**, **Evidencia** e **RecordIdAbertura**. O resumo inclui **Acoes** e **Evidencias**.
+
+- **4663:** leitura, gravação/criação, atributos e direitos de exclusão.
+- **4660:** exclusão confirmada; o caminho depende de correlação com eventos de abertura do objeto.
+- **5145:** verificação de acesso, não confirmação da operação.
+
+O log não separa com segurança “novo” de “editado”. Veja [como consultar ações](docs/EXEMPLOS.md#ações-nos-arquivos).
+A versão anterior está preservada em [legacy/acessos](legacy/acessos/Relatorio-AcessoPasta-antes-acoes.ps1).
+
 ## Antes de analisar
 
 - É necessário ter acesso ao log de Segurança. Auditoria só registra eventos depois de habilitada.
@@ -73,7 +84,7 @@ Na v8, use caminhos completos nas regras. Para filtrar por rede, use o nome que 
 | `examples/` | [Modelo de grupos autorizados](examples/ListaAutorizados-exemplo.csv) |
 | `docs/` | Guias e [histórico de alterações](docs/ALTERACOES-RELATORIOS.txt) |
 | `tests/` | Validação automatizada |
-| `legacy/` | Versão anterior de permissões, apenas para referência |
+| `legacy/` | Versões anteriores de acessos e permissões |
 
 **Atualizou de uma versão antiga?** Os scripts saíram da raiz. Ajuste os caminhos nos comandos e nas tarefas agendadas.
 

@@ -28,7 +28,7 @@ Valores iniciais do menu:
 
 Os CSVs usam a unidade do Windows quando diferente de C:. Digite `-` no campo para desativar um arquivo. Os padrões valem **só no menu**; valores informados junto de `-Menu` têm prioridade. Na linha de comando sem menu, os padrões anteriores permanecem.
 
-Na escolha de evento, digite `5145`, `4663` ou `5140`; também são aceitas as opções `1`, `2` e `3`, respectivamente. Enter mantém o evento atual.
+Na escolha de evento, digite `5145`, `4663`, `5140` ou `4660`; também são aceitas as opções `1`, `2`, `3` e `4`, respectivamente. Enter mantém o evento atual.
 
 As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
 
@@ -72,6 +72,40 @@ foreach ($evento in 5145, 5140, 4663) {
 
 Não combine Dias com Inicio/Fim. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas e minúsculas. Cada evento gera arquivos separados; o script não os correlaciona automaticamente.
 
+## Ações nos arquivos
+
+Use o original atualizado com evento 4663 para mostrar direitos utilizados no objeto:
+
+```powershell
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 `
+    -Pasta "E:\FileServer\TI\TESTES" `
+    -Inicio (Get-Date).AddMinutes(-30) `
+    -Fim (Get-Date) `
+    -EventoId 4663 `
+    -CsvSaida "C:\Relatorios\acoes-{data}.csv" `
+    -Silencioso
+```
+
+Para exclusões, repita com `-EventoId 4660`. No menu, é a opção de evento **4**.
+
+| Coluna | Conteúdo |
+| --- | --- |
+| Acao | Classificação baseada nos direitos e no tipo de evento |
+| Evidencia | Explica o que o evento permite concluir |
+| RecordIdAbertura | Registro 4656 usado para associar a exclusão ao caminho, quando disponível |
+
+`0x80` e `0x20000` são consulta de metadados. Gravação é **Gravação ou criação**: não distingue arquivo novo de arquivo editado. O uso do direito DELETE em 4663 não é apresentado como exclusão confirmada; isso exige 4660.
+
+**Correlação de exclusão:** o 4660 não traz o nome do objeto. O script consulta também 4656, 4658, 4663 e eventos de reinício/limpeza, em ordem cronológica, usando servidor, SID, sessão, processo e handle. A abertura precisa estar na janela consultada e até cinco minutos antes da exclusão. Um fechamento, nova abertura, caminho conflitante, reinício ou contexto inválido impede aproveitar o caminho antigo.
+
+Sem correlação, a exclusão aparece com caminho vazio e aviso. Com filtro de pasta, essas linhas não aparecem porque não é possível atribuí-las à pasta; a contagem fica no `.execucao.csv`. O cache tem limite de 10.000 handles; se precisar reiniciá-lo, avisa e registra a limitação.
+
+Nesse modo, o filtro de usuário é aplicado depois da correlação, mesmo com UsuarioExato. MaxEventos também conta os eventos de suporte e lê os primeiros em ordem cronológica; atingir o limite pode produzir resultado parcial. Prefira janelas curtas.
+
+A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Logs ausentes, aberturas anteriores ao período e operações longas podem deixar exclusões sem caminho. O script não altera a política nem a SACL.
+
+A v8 não recebeu essas colunas nem o suporte a 4660 nesta alteração.
+
 ## Comparar com grupos autorizados
 
 Copie o [modelo CSV](../examples/ListaAutorizados-exemplo.csv) e preencha caminhos e grupos aprovados pela empresa. Use caminhos completos, sem curingas.
@@ -103,6 +137,7 @@ Os grupos refletem a situação atual, não a data histórica do evento. Confira
 | 5145 | Verificação de acesso pela rede SMB; não comprova leitura do conteúdo |
 | 5140 | Acesso ao compartilhamento, sem detalhar cada arquivo |
 | 4663 | Uso de direito auditado no objeto; exige política File System e auditoria na pasta (SACL) |
+| 4660 | Exclusão registrada; nome do objeto depende da correlação |
 
 Para preservar cada evento, gere o detalhado sem Agrupar. ConcedidoPor mostra a regra de permissão identificada, não quem configurou a pasta. Sem eventos não significa ausência de acessos.
 

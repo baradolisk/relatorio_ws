@@ -261,3 +261,23 @@ CORREÇÃO DA ESCOLHA DE EVENTO NO MENU
 - 66 verificações simuladas aprovadas, incluindo seleção dos três IDs,
   números de opção, correção de entrada inválida e preservação com Enter.
 - Sem alteração na consulta de eventos por linha de comando.
+
+AÇÕES NOS ARQUIVOS E HISTÓRICO EM LEGACY
+- Cópia binariamente idêntica do original no commit 1a5078c preservada em
+  legacy/acessos/Relatorio-AcessoPasta-antes-acoes.ps1.
+- Novas colunas Acao, Evidencia e RecordIdAbertura no detalhado e nos objetos.
+- Resumo acrescenta Acoes/Evidencias. Colunas anteriores preservadas.
+- 4663 classifica direitos sem inventar a distinção entre criação e edição.
+- 5145 é classificado como verificação SMB; falha não confirma operação.
+- 4660 acrescentado à linha de comando e ao menu (opção 4).
+- Exclusão correlacionada usa 4656 no mesmo servidor, SID, sessão, processo e
+  handle, em ordem crescente; considera fechamento, reutilização, caminhos
+  conflitantes, reinício, limpeza do log e limite conservador de cinco minutos.
+- Sem contexto, a exclusão é mantida sem caminho na consulta sem filtro de pasta.
+  Com filtro, não atribui pasta desconhecida e avisa a quantidade no diagnóstico.
+- Consulta 4660 inclui eventos de suporte; limite inclui esses eventos e usuário
+  é filtrado após correlação. Cache máximo de 10.000 handles com aviso de descarte.
+- Snapshot legacy e novas ações não modificam políticas, SACL ou permissões.
+- A v8 não foi alterada. Windows real e PowerShell 5.1 ainda precisam de teste.
+- Validação final: 103 verificações simuladas aprovadas no PowerShell 7.4.13;
+  nenhuma validação em Windows real foi realizada nesta entrega.
