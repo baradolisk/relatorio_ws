@@ -205,5 +205,66 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
     }
 }
 
+# Diagnóstico de volume: simular o serviço de eventos, sem consultar Windows.
+& {
+    $relatorio = Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta.ps1'
+    if (-not ('EventoTesteDesempenho' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+public class EventoTesteDesempenho : IDisposable {
+    public static int Descartados;
+    public int Id { get { return 5145; } }
+    public int RecordId { get; set; }
+    public string MachineName { get { return "SRV"; } }
+    public DateTime TimeCreated { get { return DateTime.Now.AddMinutes(-1); } }
+    public long Keywords { get { return 9007199254740992L; } }
+    public string ToXml() { return "<Event><EventData><Data Name=\"SubjectUserName\">Admrh01</Data><Data Name=\"SubjectDomainName\">EMPRESA</Data><Data Name=\"ShareName\">\\\\*\\z</Data><Data Name=\"ShareLocalPath\">\\??\\E:\\FileServer</Data><Data Name=\"RelativeTargetName\">RH\\a.txt</Data><Data Name=\"AccessMask\">0x1</Data><Data Name=\"AccessReason\">(A;;0x1;;;S-1-5-21-1-2-3-1001)</Data></EventData></Event>"; }
+    public void Dispose() { Descartados++; }
+}
+'@
+    }
+    function Get-WinEvent {
+        [CmdletBinding()]
+        param($ListLog,$LogName,$MaxEvents,[switch]$Oldest,$FilterXPath,$ComputerName)
+        if($ListLog){return [pscustomobject]@{MaximumSizeInBytes=2147483648}}
+        if($Oldest){return [pscustomobject]@{TimeCreated=(Get-Date).AddDays(-10)}}
+        $global:TesteFiltroConsultaDesempenho = $FilterXPath
+        $quantidade = 12
+        if ($MaxEvents -gt 0) { $quantidade = [math]::Min(12, $MaxEvents) }
+        for ($i=0;$i -lt $quantidade;$i++) {
+            $obj = New-Object EventoTesteDesempenho
+            $obj.RecordId = $i + 1
+            $obj
+        }
+    }
+    $temporario = Join-Path ([IO.Path]::GetTempPath()) ('consulta-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $temporario
+    try {
+        [EventoTesteDesempenho]::Descartados = 0
+        $csv = Join-Path $temporario 'limitado.csv'
+        $avisos = @()
+        $linhas = @(& $relatorio -Computador SRV -Usuario Admrh01 -UsuarioExato -Dias 5 -MaxEventos 5 -CsvSaida $csv -Silencioso -PassThru -WarningVariable avisos 3>$null 6>$null)
+        Assert-Resultado ($linhas.Count -eq 5) 'Limite é encaminhado ao serviço de eventos'
+        Assert-Resultado ([EventoTesteDesempenho]::Descartados -eq 5) 'Cada registro de evento é liberado após conversão'
+        Assert-Resultado (@($avisos | Where-Object { $_ -like '*Resultado pode ser parcial*' }).Count -eq 1) 'Limite atingido produz aviso de parcialidade'
+        $diag = Import-Csv -LiteralPath ($csv + '.execucao.csv') -Delimiter ';'
+        Assert-Resultado ($diag.EventosLidos -eq 5 -and $diag.Estado -like 'Limite atingido*') 'Diagnóstico registra limite, contagem e estado'
+        Assert-Resultado ($global:TesteFiltroConsultaDesempenho.Contains("Data[@Name='SubjectUserName']='Admrh01'")) 'Usuário exato é filtrado na consulta ao log'
+        Assert-Resultado ($global:TesteFiltroConsultaDesempenho.Contains('@SystemTime<=')) 'Consulta por Dias também fixa o fim da janela'
+        Assert-Resultado ($linhas[0].ConcedidoPor -eq 'S-1-5-21-1-2-3-1001') 'Sem consulta ao domínio por padrão, SID é preservado'
+
+        $linhas = @(& $relatorio -Computador SRV -Pasta 'inexistente' -MaxEventos 5 -CsvSaida (Join-Path $temporario 'vazio.csv') -Silencioso -PassThru 3>$null 6>$null)
+        Assert-Resultado ($linhas.Count -eq 0 -and (Test-Path (Join-Path $temporario 'vazio.csv.execucao.csv'))) 'Limite antes do filtro não é apresentado como busca completa sem resultados'
+        $avisos = @()
+        $linhas = @(& $relatorio -Computador SRV -MaxEventos 0 -Silencioso -PassThru -WarningVariable avisos 3>$null 6>$null)
+        Assert-Resultado ($linhas.Count -eq 12) 'Zero não corta a consulta'
+        Assert-Resultado (@($avisos | Where-Object { $_ -like '*Limite de*' }).Count -eq 0) 'Consulta sem limite não recebe alerta de corte'
+    }
+    finally {
+        Remove-Item -LiteralPath $temporario -Recurse -Force
+        Remove-Variable -Name TesteFiltroConsultaDesempenho -Scope Global -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."
 Write-Output 'Não valida integração Windows/AD/SMB, cobertura real de auditoria ou Windows PowerShell 5.1.'

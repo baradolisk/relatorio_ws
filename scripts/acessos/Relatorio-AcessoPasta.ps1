@@ -8,6 +8,12 @@
     5140: conexão ao compartilhamento. 4663: direito auditado no objeto; exige SACL.
     Sem registros não significa ausência de acessos. Consulta apenas o log ativo.
 
+.PARAMETER MaxEventos
+    Limite por servidor antes dos filtros de pasta/usuário. Zero: sem limite. Resultado pode ser parcial.
+
+.PARAMETER ResolverSids
+    Traduz SIDs para nomes. Pode aguardar respostas do domínio; desativado por padrão.
+
 .PARAMETER Menu
     Abre o menu com valores sugeridos e exportação CSV. Omita em tarefas agendadas.
 
@@ -153,7 +159,12 @@ param (
 
     [switch]$PassThru,
 
-    [switch]$Menu
+    [switch]$Menu,
+
+    [ValidateRange(0, 2147483647)]
+    [int]$MaxEventos = 0,
+
+    [switch]$ResolverSids
 )
 
 # ATENÇÃO: nomes de variáveis no PowerShell não diferenciam maiúsculas de
@@ -340,7 +351,7 @@ function Resolve-SidConta {
 
     $nome = $Sid
 
-    if ($Sid -like 'S-1-*') {
+    if ($ResolverSids -and $Sid -like 'S-1-*') {
 
         try {
             $nome = ([System.Security.Principal.SecurityIdentifier]::new($Sid)).Translate(
@@ -376,6 +387,8 @@ function Get-ConcessaoAcesso {
         return $saida
     }
 
+    if ($script:cacheConcessao.ContainsKey($AccessReason)) { return $script:cacheConcessao[$AccessReason] }
+
     $contas = New-Object 'System.Collections.Generic.List[string]'
 
     $regexAce = [regex]'\((?<tipo>[A-Za-z]+);(?<flags>[A-Za-z]*);(?<dir>[0-9A-Za-z]*);[^;)]*;[^;)]*;(?<sid>[^;)]+)\)'
@@ -404,6 +417,7 @@ function Get-ConcessaoAcesso {
     }
 
     $saida.Contas = ($contas -join '; ')
+    if ($script:cacheConcessao.Count -lt 5000) { $script:cacheConcessao[$AccessReason] = $saida }
 
     return $saida
 }
@@ -958,6 +972,7 @@ function Show-MenuRelatorioAcesso {
     $cfg = [ordered]@{
         Computador       = @($computadorPadrao)
         EventoId         = 5145
+        MaxEventos       = 0
         UsaPeriodo       = $false
         Dias             = 1
         Inicio           = $agoraMenu.AddDays(-1)
@@ -979,8 +994,9 @@ function Show-MenuRelatorioAcesso {
         IncluirCompartilhamentosEspeciais = @{ Ativo = $false; Desc = 'Inclui IPC$, ADMIN$, C$...' }
         ListarCompartilhamentos           = @{ Ativo = $false; Desc = 'Lista compartilhamentos e registros encontrados' }
         EnriquecerAD                      = @{ Ativo = $false; Desc = 'Departamento e cargo do AD' }
+        ResolverSids                      = @{ Ativo = $false; Desc = 'Traduz SIDs em nomes (depende do domínio)' }
         ResolverIP                        = @{ Ativo = $false; Desc = 'Nome da estação (DNS reverso)' }
-        Silencioso                        = @{ Ativo = $false; Desc = 'Não imprime resumos no console' }
+        Silencioso                        = @{ Ativo = $true; Desc = 'Não imprime resumos no console' }
         GridView                          = @{ Ativo = $false; Desc = 'Abre o resultado em janela' }
         PassThru                          = @{ Ativo = $false; Desc = 'Retorna objetos para o pipeline' }
     }
@@ -1291,6 +1307,7 @@ function Show-MenuRelatorioAcesso {
 
         $p.Computador = @($cfg.Computador)
         $p.EventoId = [int]$cfg.EventoId
+        if ($cfg.MaxEventos -gt 0) { $p.MaxEventos = [int]$cfg.MaxEventos }
 
         if ($cfg.UsaPeriodo -and $null -ne $cfg.Inicio) {
 
@@ -1431,6 +1448,10 @@ function Show-MenuRelatorioAcesso {
         Write-Host " 9) CSV detalhado         : $textoCsv"
         Write-Host "10) CSV resumo            : $textoResumo"
         Write-Host "11) Lista de autorizados  : $textoAut"
+        $textoLimite = 'sem limite'
+        if ($cfg.MaxEventos -gt 0) { $textoLimite = "$($cfg.MaxEventos) por servidor; pode ser parcial" }
+        Write-Host "12) Limite de diagnóstico : $textoLimite"
+        if ($cfg.Usuario -ne '*' -and -not $cfg.UsuarioExato) { Write-Host ' Usuário filtrado após leitura. Nome exato (opção 5) pode acelerar.' -ForegroundColor Yellow }
         Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host ' E) Executar relatório      Q) Sair'
         Write-Host ' Pronto para executar. Altere somente o que precisar.'
@@ -1457,6 +1478,7 @@ function Show-MenuRelatorioAcesso {
             '9'  { Edit-Csv -Campo 'CsvSaida'  -Titulo 'CSV detalhado' }
             '10' { Edit-Csv -Campo 'CsvResumo' -Titulo 'CSV resumo' }
             '11' { Edit-ListaAutorizados }
+            '12' { $cfg.MaxEventos = Read-Inteiro 'Limite por servidor (0 = sem limite)' $cfg.MaxEventos 0 2147483647 }
             'E'  { Invoke-Relatorio }
             'Q'  { return }
             default { }
@@ -1501,6 +1523,8 @@ else {
     $usaFim = $false
 }
 
+$usaFim = $true # Fechar a janela antes da consulta, inclusive no modo Dias.
+
 # Padrão de busca da pasta com caracteres especiais escapados ([ ] * ?)
 # (sem -Pasta, o filtro de pasta fica aberto e considera tudo)
 if ([string]::IsNullOrWhiteSpace($Pasta)) {
@@ -1519,6 +1543,7 @@ $ignoradosExcluidos = 0
 
 # Cache de resolução de SIDs e apelidos SDDL usados no AccessReason (5145)
 $cacheSid = @{}
+$cacheConcessao = @{}
 $aliasesSddl = @{
     WD = 'Everyone'
     AU = 'NT AUTHORITY\Authenticated Users'
@@ -1681,6 +1706,7 @@ $condicoesSistema += " and TimeCreated[$clausulaTempo]"
 
 $xpath = "*[System[$condicoesSistema]"
 
+$filtroUsuarioNoLog = $false
 # Filtro de usuário na consulta (opcional, mais rápido; diferencia maiúsculas).
 # Se houver aspas ou "\" no nome, o filtro fica apenas no PowerShell para evitar
 # incompatibilidades com o subconjunto XPath aceito pelo Event Log.
@@ -1691,6 +1717,7 @@ if (
 ) {
 
     $xpath += " and EventData[Data[@Name='SubjectUserName']='$Usuario']"
+    $filtroUsuarioNoLog = $true
 }
 elseif ($UsuarioExato) {
 
@@ -1708,6 +1735,7 @@ Write-Verbose "XPath: $xpath"
 
 $registros = New-Object 'System.Collections.Generic.List[object]'
 $indiceGrupos = @{}
+$diagnosticoConsulta = New-Object 'System.Collections.Generic.List[object]'
 
 foreach ($servidor in $Computador) {
     $pastaLocalTraduzida = ''
@@ -1765,12 +1793,33 @@ foreach ($servidor in $Computador) {
         $parametrosLog.ComputerName = $servidor
     }
 
+    if ($MaxEventos -gt 0) { $parametrosLog.MaxEvents = $MaxEventos }
+    $tempoConsulta = [Diagnostics.Stopwatch]::StartNew()
+    $consultadosServidor = 0
+    $linhasAntes = $registros.Count
+    $ultimoProgresso = -5.0
+    $estadoConsulta = 'Concluída'
+    Write-Host 'Buscando eventos. Ctrl+C interrompe; o filtro de pasta é aplicado após a leitura.' -ForegroundColor DarkGray
+    if ($Usuario -ne '*' -and -not $filtroUsuarioNoLog) {
+        Write-Host 'O usuário também será filtrado após a leitura; UsuarioExato pode acelerar (diferencia caixa).' -ForegroundColor Yellow
+    }
     try {
 
         Get-WinEvent @parametrosLog |
             ForEach-Object {
 
-                $registro = Convert-EventoAcesso -Evento $_
+                $eventoAtual = $_
+                $consultadosServidor++
+                if (($tempoConsulta.Elapsed.TotalSeconds - $ultimoProgresso) -ge 5) {
+                    $ultimoProgresso = $tempoConsulta.Elapsed.TotalSeconds
+                    $status = "Lidos: $consultadosServidor | Linhas encontradas: $($registros.Count - $linhasAntes) | Tempo: $($tempoConsulta.Elapsed.ToString())"
+                    Write-Progress -Id 1 -Activity "Consulta em $servidor" -Status $status
+                    Write-Host $status -ForegroundColor DarkGray
+                }
+                try { $registro = Convert-EventoAcesso -Evento $eventoAtual }
+                finally {
+                    if ($eventoAtual -is [IDisposable]) { $eventoAtual.Dispose() }
+                }
 
                 if ($null -eq $registro) {
                     return
@@ -1829,15 +1878,41 @@ foreach ($servidor in $Computador) {
         # Detecção independente do idioma do Windows
         if ($_.FullyQualifiedErrorId -like 'NoMatchingEventsFound*') {
 
+            $estadoConsulta = 'Sem eventos correspondentes'
             $servidoresSemEventos.Add($servidor)
             continue
         }
 
         Write-Warning "[$servidor] Falha ao ler o log de Segurança: $($_.Exception.Message)"
 
+        $estadoConsulta = 'Falha de leitura; possível resultado parcial'
         $servidoresComErro.Add($servidor)
         continue
     }
+    finally {
+        $tempoConsulta.Stop()
+        Write-Progress -Id 1 -Activity "Consulta em $servidor" -Completed
+        if ($MaxEventos -gt 0 -and $consultadosServidor -ge $MaxEventos) {
+            $estadoConsulta = 'Limite atingido; cobertura possivelmente parcial'
+            Write-Warning "[$servidor] Limite de $MaxEventos eventos atingido ANTES dos filtros. Resultado pode ser parcial; use zero para consultar sem limite."
+        }
+        Write-Host "[$servidor] $consultadosServidor eventos lidos; $($registros.Count - $linhasAntes) linhas; tempo $($tempoConsulta.Elapsed)."
+        $diagnosticoConsulta.Add([pscustomobject]@{
+            Servidor = Protect-CsvCell $servidor; Estado = $estadoConsulta
+            Inicio = $dataInicio.ToString('o'); Fim = $dataFim.ToString('o')
+            EventosLidos = $consultadosServidor; Linhas = $registros.Count - $linhasAntes
+            Limite = $MaxEventos; Segundos = [math]::Round($tempoConsulta.Elapsed.TotalSeconds, 2)
+            Usuario = Protect-CsvCell $Usuario; UsuarioExato = [bool]$UsuarioExato
+            FiltroUsuarioNoLog = $filtroUsuarioNoLog
+        })
+    }
+}
+if ($CsvSaida) {
+    $dirDiagnostico = Split-Path -Parent $CsvSaida
+    if ($dirDiagnostico -and -not (Test-Path -LiteralPath $dirDiagnostico)) {
+        New-Item -ItemType Directory -Path $dirDiagnostico -Force | Out-Null
+    }
+    $diagnosticoConsulta | Export-Csv -LiteralPath ($CsvSaida + '.execucao.csv') -Delimiter ';' -Encoding UTF8 -NoTypeInformation
 }
 
 
@@ -1897,6 +1972,7 @@ if ($registros.Count -eq 0) {
 # Ordenação e totais
 # ============================================================
 
+Write-Host "Ordenando $($registros.Count) linhas para gerar os relatórios..." -ForegroundColor DarkGray
 $registros = @(
     $registros |
     Sort-Object DataHora -Descending

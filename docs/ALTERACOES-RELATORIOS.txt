@@ -233,3 +233,22 @@ VALORES PADRÃO NO MENU
 - Valores explícitos passados com -Menu prevalecem. Sem -Menu, os padrões
   e a execução anteriores continuam iguais, conforme escolha do usuário.
 - 48 verificações simuladas aprovadas; Windows real ainda não validado.
+
+INVESTIGAÇÃO DE CONSULTA DEMORADA
+Cenário informado: menu, todas as pastas, cinco dias e usuário Admrh01.
+- Sem UsuarioExato, usuário e pasta são filtrados após a leitura dos eventos.
+- Acrescentados progresso, contagens e duração por servidor, inclusive no modo Silencioso.
+- Menu usa Silencioso por padrão para evitar renderização de tabelas extensas.
+- Tradução de SID para nomes tornou-se opcional com ResolverSids; identificadores
+  continuam no CSV e a detecção por SID de grupos amplos foi preservada.
+- Cache limitado a 5.000 razões de acesso evita repetir a análise de ACEs iguais.
+- Registros IDisposable são liberados após converter o evento.
+- MaxEventos (zero por padrão) limita a leitura por servidor; o limite atua antes
+  dos filtros locais e produz aviso explícito de possível resultado parcial.
+- Menu permite configurar o limite na opção 12.
+- CSV auxiliar .execucao.csv registra estado, contagem, limite e tempo, mesmo
+  quando a consulta não gera linhas correspondentes. Não substitui auditoria de cobertura.
+- Janela final fixada antes da coleta, inclusive com Dias.
+- 58 verificações simuladas aprovadas, incluindo consulta exata, limite, descarte
+  de recursos e diagnóstico. Não foi reproduzida a demora em Windows real.
+- Não há timeout: chamadas de sistema ou rede podem aguardar sem atualizar progresso.

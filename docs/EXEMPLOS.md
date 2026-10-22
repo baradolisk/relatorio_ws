@@ -23,11 +23,14 @@ Valores iniciais do menu:
 | CSV detalhado | `C:\Relatorios\acessos-{data}.csv` |
 | CSV resumo | `C:\Relatorios\resumo-{data}.csv` |
 | Lista de autorizados | Desativada; exige seu CSV de regras |
-| Opções adicionais | Todas desativadas; habilite na opção 8 |
+| Opções adicionais | Silencioso ativado; demais desativadas. Altere na opção 8 |
+| Limite de diagnóstico | Zero: sem limite. Altere na opção 12 |
 
 Os CSVs usam a unidade do Windows quando diferente de C:. Digite `-` no campo para desativar um arquivo. Os padrões valem **só no menu**; valores informados junto de `-Menu` têm prioridade. Na linha de comando sem menu, os padrões anteriores permanecem.
 
 As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
+
+A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
 
 A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões e não substitui a classificação por SID da v8.
 

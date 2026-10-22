@@ -10,6 +10,8 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 
 | Parâmetro | Uso / padrão |
 | --- | --- |
+| `MaxEventos` | Somente original: máximo de eventos lidos por servidor, antes dos filtros locais. Zero (padrão) não limita. Atingir o limite pode deixar o resultado parcial. |
+| `ResolverSids` | Somente original: traduz SIDs para nomes usando o domínio. Desativado por padrão para evitar esperas; SID continua no relatório. |
 | `Menu` | Somente original: abre as opções na tela. Omita em tarefas agendadas. |
 | `Pasta` | Trecho ou caminho local/UNC. Opcional; sem ele, todas as pastas presentes nos eventos. Busca por trecho pode incluir nomes parecidos. |
 | `Dias` | Dias anteriores, 1 a 3650; padrão 1. Não combinar com Inicio/Fim. |
@@ -44,7 +46,7 @@ $registros | Where-Object Resultado -eq 'Falha'
 
 ## Relatorio-AcessoPasta-v8.ps1
 
-Possui os parâmetros do original, exceto `Menu`, e acrescenta:
+Possui os parâmetros do original, exceto `Menu`, `MaxEventos` e `ResolverSids`, e acrescenta:
 
 | Parâmetro | Uso |
 | --- | --- |

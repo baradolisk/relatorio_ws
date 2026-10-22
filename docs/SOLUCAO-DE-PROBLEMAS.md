@@ -53,7 +53,26 @@ O original corrigido trata nomes curtos e completos do servidor. Na v8, use o no
 
 ## Demora depois de “Consultando log”
 
-Se o prompt não voltou, a consulta pode continuar ativa. Interrompa com Ctrl+C e tente 15 minutos. Evite ResolverIP e EnriquecerAD no primeiro teste. Silencioso apenas oculta tabelas; não reduz o trabalho.
+A consulta pode ler muitos eventos antes de filtrar pasta e usuário. Na versão atual, acompanhe as contagens e o tempo. Se o usuário for específico, ative UsuarioExato usando a mesma grafia do log.
+
+Para um teste curto e limitado:
+
+```powershell
+.\scripts\acessos\Relatorio-AcessoPasta.ps1 `
+    -Inicio (Get-Date).AddMinutes(-15) `
+    -Fim (Get-Date) `
+    -Usuario "usuario.teste" `
+    -UsuarioExato `
+    -MaxEventos 10000 `
+    -Silencioso `
+    -CsvSaida "C:\Relatorios\diagnostico-{data}.csv"
+```
+
+O limite vale antes dos filtros locais. Se for atingido, o aviso e o arquivo `.execucao.csv` indicam que a busca pode estar parcial. Remova o limite (zero) ou reduza o período para uma coleta completa.
+
+No menu, escolha o limite na opção 12. Silencioso já vem ativado para evitar tabelas enormes. ResolverSids, ResolverIP e EnriquecerAD podem depender da rede/domínio; mantenha desativados no primeiro teste. A tradução de SID agora é opcional e o identificador continua disponível.
+
+Os registros ainda ficam em memória. Progresso é atualizado quando chegam eventos; uma espera pelo Windows, rede, AD ou DNS pode não atualizar a tela. Se necessário, use Ctrl+C. O script não impõe um prazo máximo de execução. Se ficar apenas em “Buscando eventos”, teste Get-WinEvent localmente com uma janela curta e envie a última mensagem e o arquivo de diagnóstico, removendo dados sensíveis.
 
 ## Falha remota ou relatório incompleto
 
