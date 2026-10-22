@@ -67,7 +67,7 @@
     Lista os compartilhamentos dos servidores informados.
 
 .PARAMETER ListaAutorizados
-    CSV Pasta;Grupo. Requer ActiveDirectory/RSAT. Para classificação, prefira a v8.
+    CSV Pasta;Grupo. Requer ActiveDirectory/RSAT. Comparação auxiliar por nome e trecho.
 
 .PARAMETER EnriquecerAD
     Acrescenta departamento e cargo. Requer ActiveDirectory/RSAT.
@@ -99,7 +99,7 @@
 .NOTES
     Veja README.md, docs/PARAMETROS.md e docs/EXEMPLOS.md para mais opções.
     PowerShell 5.1 e Windows Server real ainda precisam de validação no seu ambiente.
-    Para classificação por grupos, prefira a v8; esta versão usa nome e trecho.
+    A classificação por grupos usa nome e trecho; não comprova autorização efetiva.
     Caminho de rede usa o nome do compartilhamento: Get-SmbShare mostra Name e Path.
 #>
 
@@ -1630,7 +1630,7 @@ function Show-MenuRelatorioAcesso {
         Write-Host ' E) Executar relatório      Q) Sair'
         Write-Host ' Pronto para executar. Altere somente o que precisar.'
         Write-Host ' Enter mantém o valor; - limpa um filtro/caminho ou desativa um CSV.'
-        if ($cfg.ListaAutorizados) { Write-Host ' Autorização por grupos: prefira a v8 para classificação por SID.' -ForegroundColor Yellow }
+        if ($cfg.ListaAutorizados) { Write-Host ' Autorização por grupos é auxiliar; confira identidade e permissões.' -ForegroundColor Yellow }
         Write-Host '============================================================' -ForegroundColor DarkGray
     }
 

@@ -311,3 +311,7 @@ OTIMIZAÇÃO DO FILTRO EXATO NO EVENTO 4660
   precisa coincidir com o log. Sem UsuarioExato, continua a leitura ampla.
 - 139 verificações simuladas aprovadas, incluindo preservação dos eventos
   de apoio e reinício. Windows real e melhora de tempo ainda não medidos.
+- Incorporada remoção da v8 já publicada pelo usuário no GitHub. Referências
+  e testes do arquivo removido ajustados; não foi restaurado o script.
+- Após incorporar a remoção da v8: 130 verificações ativas aprovadas; os
+  testes exclusivos do arquivo removido foram retirados junto das referências.

@@ -34,7 +34,7 @@ As opções são as do relatório original. Enter mantém o valor; `-` limpa um 
 
 O progresso separa eventos do tipo selecionado e eventos de apoio, mostrando também o horário que está sendo processado. A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
 
-A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões e não substitui a classificação por SID da v8.
+A execução não altera permissões nem habilita auditoria. O menu não integra o inventário de permissões.
 
 ## Todas as pastas e contas
 
@@ -107,31 +107,11 @@ Com UsuarioExato, o usuário também é filtrado diretamente no log em modo 4660
 
 A leitura do CSV não substitui a auditoria: habilite File System e as entradas de SACL para criar/gravar/excluir. Para registrar fechamentos 4658, configure também **Handle Manipulation / Manipulação de Identificadores**, conforme a política da empresa. Metadados, gravação, DELETE_CHILD sozinho e DELETE com falha não alimentam a alternativa. O 4663 sozinho não confirma exclusão: é necessário o 4660 posterior. Logs ausentes, contexto inconsistente ou evidências fora do período/limite podem deixar o caminho vazio. O script não altera a política nem a SACL.
 
-A v8 não recebeu essas colunas nem o suporte a 4660 nesta alteração.
+## Lista de grupos autorizados
 
-## Comparar com grupos autorizados
+`-ListaAutorizados` aceita um CSV `Pasta;Grupo` e requer ActiveDirectory/RSAT. Adapte o [modelo](../examples/ListaAutorizados-exemplo.csv) às regras aprovadas pela empresa.
 
-Copie o [modelo CSV](../examples/ListaAutorizados-exemplo.csv) e preencha caminhos e grupos aprovados pela empresa. Use caminhos completos, sem curingas.
-
-```powershell
-.\scripts\acessos\Relatorio-AcessoPasta-v8.ps1 `
-    -Computador "SRV-ARQ1" `
-    -Dias 1 `
-    -ListaAutorizados "C:\Configuracao\autorizados.csv" `
-    -ServidorAD "dc1.empresa.local" `
-    -CsvSaida "C:\Relatorios\acessos-{data}.csv"
-```
-
-Requer ActiveDirectory/RSAT. A regra mais específica prevalece; grupos na mesma regra são alternativas. Uma regra local, como `E:\FileServer\RH`, vale para esse caminho em todos os servidores consultados. Para identificar um servidor específico em eventos SMB, prefira o caminho de rede exibido no CSV.
-
-| Resultado | Significado |
-| --- | --- |
-| Autorizado | SID encontrado em um grupo permitido |
-| NAO AUTORIZADO | Nenhum grupo permitido confirmou o SID, com consultas completas |
-| Sem regra | Nenhuma regra corresponde ao caminho |
-| Indeterminado | Faltam dados para concluir, por exemplo grupo indisponível ou SID ausente |
-
-Os grupos refletem a situação atual, não a data histórica do evento. Confira também o arquivo `.cobertura.csv`. A classificação anterior do script original usa nome e trecho de caminho; prefira a v8 para essa análise.
+A implementação disponível é auxiliar: usa nome de usuário e trecho do caminho. Nomes iguais em domínios diferentes, pastas com nomes parecidos e consultas parciais de grupos podem produzir classificações incorretas. Confira as permissões e a identidade antes de concluir que um acesso é autorizado ou indevido. Os grupos consultados são os atuais, não os históricos.
 
 ## Entender o relatório
 

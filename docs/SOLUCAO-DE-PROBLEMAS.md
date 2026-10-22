@@ -49,7 +49,7 @@ Sem 5145, confira Detailed File Share. Para 4663, confira também auditoria na p
 
 Confira os nomes com `Get-SmbShare | Select-Object Name, Path`. Se `z` aponta para `E:\FileServer`, use `\\SERVIDOR\z`.
 
-O original corrigido trata nomes curtos e completos do servidor. Na v8, use o nome mostrado no CSV; para 4663, use caminho local. Nomes alternativos e DFS não são traduzidos automaticamente.
+O relatório corrigido trata nomes curtos e completos do servidor. Para diagnóstico de 4663, prefira caminho local. Nomes alternativos e DFS não são traduzidos automaticamente.
 
 ## Demora depois de “Consultando log”
 
@@ -78,7 +78,7 @@ Os registros ainda ficam em memória. Progresso é atualizado quando chegam even
 
 - Teste primeiro no servidor local, com acesso ao log de Segurança.
 - Log remoto depende de permissões e RPC/firewall; inventário usa CIM e leitura de pastas usa SMB. Não desative o firewall inteiro.
-- Confira avisos e o CSV de cobertura da v8 ou do inventário v2.
+- Confira avisos, o `.execucao.csv` do relatório de acessos e o CSV de cobertura do inventário v2.
 - Confira a data do CSV: quando não há registros, o detalhado pode não ser criado e um arquivo antigo continuar na pasta.
 - Indeterminado significa que faltam dados para concluir a autorização.
 

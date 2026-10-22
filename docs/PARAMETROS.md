@@ -29,7 +29,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 | `ExcluirUsuarios` | Lista de padrões de usuários/contas a excluir. |
 | `IncluirCompartilhamentosEspeciais` | Inclui IPC$, ADMIN$, print$ e compartilhamentos de unidade como C$. |
 | `ListarCompartilhamentos` | Consulta inventário dos servidores informados; não descobre servidores do domínio. |
-| `ListaAutorizados` | CSV Pasta;Grupo; requer AD/RSAT. Implementação antiga por nome/trecho: para classificação, prefira v8. |
+| `ListaAutorizados` | CSV Pasta;Grupo; requer AD/RSAT. Comparação auxiliar por nome e trecho; não comprova autorização efetiva. |
 | `EnriquecerAD` | Acrescenta departamento/cargo; requer AD/RSAT. |
 | `ResolverIP` | DNS reverso do IP; pode ser lento ou não refletir o nome real da estação. |
 | `CsvResumo` | CSV agregado por usuário e pasta; aceita `{data}`. |
@@ -43,21 +43,6 @@ Exemplo de objetos, sem exportação obrigatória:
 $registros = .\scripts\acessos\Relatorio-AcessoPasta.ps1 -Dias 1 -Silencioso -PassThru
 $registros | Where-Object Resultado -eq 'Falha'
 ```
-
-## Relatorio-AcessoPasta-v8.ps1
-
-Possui os parâmetros do original, exceto `Menu`, `MaxEventos` e `ResolverSids`, e acrescenta:
-
-| Parâmetro | Uso |
-| --- | --- |
-| `ServidorAD` | Servidor/controlador/domínio para consulta inicial ao AD. |
-| `CsvCobertura` | Caminho de cobertura por servidor; se omitido com CsvSaida, usa `<CsvSaida>.cobertura.csv`. |
-
-A v8 aceita somente os eventos 5145, 5140 e 4663; não inclui as novas colunas de ações.
-
-Na v8, a lista de autorizados exige caminhos completos; correspondência de raiz
-ou descendente, sem curingas. Consulta grupos por SID e trata falhas como
-Indeterminado. Veja limitações de nomes UNC e 4663 no README.
 
 ## Inventário de permissões
 

@@ -4,7 +4,7 @@ Abra uma issue com o script usado, versão do PowerShell, comando, erro e result
 
 Para propor uma correção:
 
-1. Crie uma branch e altere a versão correta: original, v8 ou permissões v2.
+1. Crie uma branch e altere a versão correta: acessos ou permissões v2.
 2. Mantenha compatibilidade com PowerShell 5.1 e UTF-8 com BOM nos scripts.
 3. Atualize exemplos, documentação e testes afetados.
 4. Execute na raiz:

@@ -37,10 +37,9 @@ O menu está no relatório original. Para tarefas agendadas, continue usando os 
 | Quero… | Script |
 | --- | --- |
 | Consultar acessos por nome ou caminho de pasta | [Relatório de acessos](scripts/acessos/Relatorio-AcessoPasta.ps1) |
-| Comparar acessos com grupos autorizados | [Relatório de acessos v8](scripts/acessos/Relatorio-AcessoPasta-v8.ps1) |
 | Listar permissões das pastas compartilhadas | [Relatório de permissões v2](scripts/permissoes/Relatorio-PermissoesPasta-v2.ps1) |
 
-Na v8, use caminhos completos nas regras. Para filtrar por rede, use o nome que aparece no CSV; para o evento 4663, use caminho local. O original tem o tratamento de nomes de rede mais completo; prefira a v8 para classificar autorização por grupos.
+A opção ListaAutorizados do relatório de acessos é uma comparação auxiliar por nome e trecho de caminho; não use isoladamente para concluir autorização. Os detalhes estão no guia de exemplos.
 
 ## Exemplos rápidos
 

@@ -41,36 +41,6 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
 }
 
 & {
-    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/acessos/Relatorio-AcessoPasta-v8.ps1'))
-    $sidPermitido = 'S-1-5-21-1-2-3-1001'
-    $membros = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
-    [void]$membros.Add($sidPermitido)
-    $membrosPorGrupo = @{G1=$membros}
-    $regrasAutorizacao = @(
-        [pscustomobject]@{Pasta='\\SRV\z\RH'; Grupo='G1'},
-        [pscustomobject]@{Pasta='\\SRV\z\RH'; Grupo='G2'}
-    )
-    $registro = [pscustomobject]@{
-        Usuario='EMPRESA\joao'; UsuarioSid=$sidPermitido
-        Objeto='\\SRV\z\RH\a.txt'; CaminhoLocal=''
-    }
-    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Autorizado') 'SID confirmado em um grupo'
-    $registro.UsuarioSid = 'S-1-5-21-4-5-6-1001'
-    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Indeterminado') 'Outro SID e grupo indisponível'
-    $membrosPorGrupo.G2 = $membros
-    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'NAO AUTORIZADO') 'Mesmo nome não autoriza outro SID'
-    $registro.UsuarioSid = ''
-    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Indeterminado') 'SID ausente'
-    $registro.Objeto = '\\SRV\z\RH-antigo\a.txt'
-    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Sem regra') 'Regra não alcança nome parecido'
-    Assert-Resultado ((ConvertTo-CaminhoRegra 'E:/FileServer/RH/') -eq 'E:\FileServer\RH') 'Normalizar caminho completo'
-    $rejeitado = $false
-    try { $null = ConvertTo-CaminhoRegra 'RH' } catch { $rejeitado = $true }
-    Assert-Resultado $rejeitado 'Rejeitar regra por trecho'
-    Assert-Resultado ((Get-PastaResumo -Compartilhamento '\\SRV\z' -CaminhoRelativo 'LEIAME') -eq '\\SRV\z') 'Não deduzir tipo pela extensão'
-}
-
-& {
     Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'scripts/permissoes/Relatorio-PermissoesPasta-v2.ps1'))
     Assert-Resultado (Test-SidAmplo 'S-1-1-0') 'Everyone por SID'
     Assert-Resultado (-not (Test-SidAmplo 'S-1-5-21-1-2-3-1001')) 'Usuário específico não é grupo amplo'
