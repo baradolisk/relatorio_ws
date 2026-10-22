@@ -252,3 +252,12 @@ Cenário informado: menu, todas as pastas, cinco dias e usuário Admrh01.
 - 58 verificações simuladas aprovadas, incluindo consulta exata, limite, descarte
   de recursos e diagnóstico. Não foi reproduzida a demora em Windows real.
 - Não há timeout: chamadas de sistema ou rede podem aguardar sem atualizar progresso.
+
+CORREÇÃO DA ESCOLHA DE EVENTO NO MENU
+- Causa confirmada: o menu aceitava só 1/2/3 e ignorava IDs como 4663,
+  mantendo o evento anterior (5145 por padrão) sem avisar.
+- Agora aceita IDs 5145/4663/5140 e opções 1/2/3; Enter mantém a escolha.
+- Entrada inválida mostra aviso e repete a pergunta antes de executar.
+- 66 verificações simuladas aprovadas, incluindo seleção dos três IDs,
+  números de opção, correção de entrada inválida e preservação com Enter.
+- Sem alteração na consulta de eventos por linha de comando.

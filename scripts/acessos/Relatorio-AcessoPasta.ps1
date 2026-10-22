@@ -1129,12 +1129,15 @@ function Show-MenuRelatorioAcesso {
         Write-Host '  2) ' $descEvento[4663]
         Write-Host '  3) ' $descEvento[5140]
 
-        $r = Read-Host 'Escolha o evento (Enter mantém o atual)'
-
-        switch ($r.Trim()) {
-            '1' { $cfg.EventoId = 5145 }
-            '2' { $cfg.EventoId = 4663 }
-            '3' { $cfg.EventoId = 5140 }
+        $eventosMenu = @{'1'=5145; '2'=4663; '3'=5140; '5145'=5145; '4663'=4663; '5140'=5140}
+        while ($true) {
+            $r = (Read-Host "Digite a opção ou o ID do evento [$($cfg.EventoId)]; Enter mantém").Trim()
+            if ([string]::IsNullOrWhiteSpace($r)) { return }
+            if ($eventosMenu.ContainsKey($r)) {
+                $cfg.EventoId = $eventosMenu[$r]
+                return
+            }
+            Write-Host 'Evento inválido. Use 5145, 4663 ou 5140 (ou as opções 1, 2 e 3).' -ForegroundColor Yellow
         }
     }
 

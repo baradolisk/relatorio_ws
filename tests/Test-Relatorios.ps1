@@ -91,7 +91,7 @@ foreach ($arquivo in Get-ChildItem -Path $raiz -Filter *.ps1 -Recurse -File) {
     }
     function Clear-Host { }
     function Write-Host {
-        param ([Parameter(Position=0)]$Object, $ForegroundColor)
+        param ([Parameter(Position=0, ValueFromRemainingArguments=$true)][object[]]$Object, $ForegroundColor)
         $global:TesteRelatoriosMensagensMenu.Add([string]$Object)
     }
     function Get-WinEvent { throw 'O menu não deve consultar eventos ao sair.' }
@@ -178,6 +178,24 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
         $padrao = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
         Assert-Resultado (-not $padrao.CsvSaida -and -not $padrao.CsvResumo) 'Usuário pode desativar os CSVs padrão'
         Assert-Resultado ($padrao.Usuario -eq 'joao' -and $padrao.UsuarioExato.IsPresent) 'Enter preserva usuário e opção de nome exato'
+
+        # A escolha aceita tanto ID quanto número da opção; inválidos não executam silenciosamente.
+        foreach ($escolha in @(
+            @{Entrada='4663'; Esperado=4663}, @{Entrada='5140'; Esperado=5140},
+            @{Entrada='5145'; Esperado=5145}, @{Entrada='1'; Esperado=5145},
+            @{Entrada='2'; Esperado=4663}, @{Entrada='3'; Esperado=5140}
+        )) {
+            foreach ($r in @('2',$escolha.Entrada,'E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+            Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
+            $capturaEvento = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+            Assert-Resultado ($capturaEvento.EventoId -eq $escolha.Esperado) "Menu encaminha evento escolhido: $($escolha.Entrada)"
+        }
+        $global:TesteRelatoriosMensagensMenu.Clear()
+        foreach ($r in @('2','9999','4663','2','','E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
+        $capturaEvento = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
+        Assert-Resultado ($capturaEvento.EventoId -eq 4663) 'Após inválido, aceita correção e Enter preserva a seleção'
+        Assert-Resultado (@($global:TesteRelatoriosMensagensMenu | Where-Object { $_ -like 'Evento inválido*' }).Count -eq 1) 'Evento inválido mostra aviso e repete a pergunta'
 
         # O uso antigo por parâmetros não deve abrir o menu.
         function Get-WinEvent {

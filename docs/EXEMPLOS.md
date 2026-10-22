@@ -28,6 +28,8 @@ Valores iniciais do menu:
 
 Os CSVs usam a unidade do Windows quando diferente de C:. Digite `-` no campo para desativar um arquivo. Os padrões valem **só no menu**; valores informados junto de `-Menu` têm prioridade. Na linha de comando sem menu, os padrões anteriores permanecem.
 
+Na escolha de evento, digite `5145`, `4663` ou `5140`; também são aceitas as opções `1`, `2` e `3`, respectivamente. Enter mantém o evento atual.
+
 As opções são as do relatório original. Enter mantém o valor; `-` limpa um filtro ou caminho. Em período específico, deixe o fim vazio para consultar até agora, ou use `-` para apagar um fim já preenchido. Enter aceita a data inicial sugerida. O comando mostrado usa o caminho completo do arquivo; revise-o antes de agendar e omita `-Menu`.
 
 A execução mostra progresso e salva `<CsvSaida>.execucao.csv` com contagem, duração e estado por servidor. ResolverSids fica desativado: ConcedidoPor pode conter o SID em vez do nome; habilite se precisar da tradução.
