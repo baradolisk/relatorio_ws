@@ -146,18 +146,20 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
             @{Entrada='4663'; Esperado=4663}, @{Entrada='5140'; Esperado=5140},
             @{Entrada='5145'; Esperado=5145}, @{Entrada='1'; Esperado=5145},
             @{Entrada='2'; Esperado=4663}, @{Entrada='3'; Esperado=5140},
-            @{Entrada='4660'; Esperado=4660}, @{Entrada='4'; Esperado=4660}
+            @{Entrada='4660'; Esperado=4660}, @{Entrada='4'; Esperado=4660},
+            @{Entrada='1,2,4'; Esperado=@(5145,4663,4660)},
+            @{Entrada='5145,4663,5145,5140'; Esperado=@(5145,4663,5140)}
         )) {
             foreach ($r in @('2',$escolha.Entrada,'E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
             Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
             $capturaEvento = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
-            Assert-Resultado ($capturaEvento.EventoId -eq $escolha.Esperado) "Menu encaminha evento escolhido: $($escolha.Entrada)"
+            Assert-Resultado (($capturaEvento.EventoId -join ',') -eq ($escolha.Esperado -join ',')) "Menu encaminha evento escolhido: $($escolha.Entrada)"
         }
         $global:TesteRelatoriosMensagensMenu.Clear()
         foreach ($r in @('2','9999','4663','2','','E','S','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
         Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
         $capturaEvento = Get-Content -LiteralPath $destino -Raw | ConvertFrom-Json
-        Assert-Resultado ($capturaEvento.EventoId -eq 4663) 'Após inválido, aceita correção e Enter preserva a seleção'
+        Assert-Resultado (($capturaEvento.EventoId -join ',') -eq '4663') 'Após inválido, aceita correção e Enter preserva a seleção'
         Assert-Resultado (@($global:TesteRelatoriosMensagensMenu | Where-Object { $_ -like 'Evento inválido*' }).Count -eq 1) 'Evento inválido mostra aviso e repete a pergunta'
 
         # O uso antigo por parâmetros não deve abrir o menu.
@@ -402,7 +404,7 @@ public class EventoTesteDesempenho : IDisposable {
     $null=New-Item -ItemType Directory -Path $temporario
     try{
         $csv=Join-Path $temporario 'exclusoes.csv'
-        $r=@(& $relatorio -EventoId 4660 -Computador SRV -Usuario Admrh01 -UsuarioExato -CsvSaida $csv -Silencioso -PassThru 3>$null 6>$null)
+        $r=@(& $relatorio -EventoId 4660 -Inicio ([datetime]::new(2026,10,22)) -Fim ([datetime]::new(2026,10,23)) -Computador SRV -Usuario Admrh01 -UsuarioExato -CsvSaida $csv -Silencioso -PassThru 3>$null 6>$null)
         Assert-Resultado ($r.Count -eq 4 -and $r[0].EventoId -eq 4660) 'Retornar apenas exclusões, não eventos de suporte'
         Assert-Resultado (@($r | Where-Object Acao -eq 'Exclusão confirmada').Count -eq 3) 'Somente exclusão com caminho correlacionado recebe a classificação completa'
         Assert-Resultado (@($r | Where-Object Acao -like '*caminho não identificado').Count -eq 1) 'Preservar exclusão sem caminho quando não há filtro de pasta'
@@ -431,7 +433,7 @@ public class EventoTesteDesempenho : IDisposable {
             Assert-Resultado ($null -ne $xmlReset.SelectSingleNode($seletorSemTempo)) 'Filtro mantém reinício e limpeza sem SubjectUserName'
         }
 
-        $r=@(& $relatorio -EventoId 4660 -Computador SRV -Pasta 'RH' -Silencioso -PassThru 3>$null 6>$null)
+        $r=@(& $relatorio -EventoId 4660 -Inicio ([datetime]::new(2026,10,22)) -Fim ([datetime]::new(2026,10,23)) -Computador SRV -Pasta 'RH' -Silencioso -PassThru 3>$null 6>$null)
         Assert-Resultado ($r.Count -eq 1 -and $r[0].Objeto -eq 'E:\FileServer\RH\a.txt') 'Filtro de pasta não atribui caminho a exclusão desconhecida'
     } finally {Remove-Item -LiteralPath $temporario -Recurse -Force; Remove-Variable -Name TesteXPathExclusaoAtual -Scope Global -ErrorAction SilentlyContinue}
 }
@@ -481,6 +483,72 @@ try{
 
 }finally{Remove-Item -LiteralPath $temp -Recurse -Force;Remove-Variable FolgaTesteEventos -Scope Global}
 
+}
+
+# Eventos mistos: uma consulta, cada ID interpretado e exportado separadamente.
+& {
+    $relatorio = Join-Path $raiz 'Relatorio-AcessoPasta.ps1'
+    $inicio = [datetime]::new(2026,10,22,12,0,0)
+    function Get-WinEvent {
+        [CmdletBinding()]
+        param($ListLog,$LogName,$MaxEvents,[switch]$Oldest,$FilterXPath,$ComputerName)
+        if($ListLog){return [pscustomobject]@{MaximumSizeInBytes=2147483648}}
+        if($Oldest -and -not $FilterXPath){return [pscustomobject]@{TimeCreated=$inicio.AddDays(-10)}}
+        $global:TesteFiltroMisto = $FilterXPath
+        $global:TesteOrdemMista = [bool]$Oldest
+        foreach($caso in @(
+            @{Id=4663;Record=1;Offset=-30;Mask='0x10000'},
+            @{Id=4656;Record=2;Offset=-20;Mask='0x10000'},
+            @{Id=4660;Record=3;Offset=1;Mask=''},
+            @{Id=4663;Record=4;Offset=2;Mask='0x2'},
+            @{Id=5145;Record=5;Offset=3;Mask='0x1'},
+            @{Id=5140;Record=6;Offset=4;Mask=''},
+            @{Id=5145;Record=7;Offset=5;Mask='0x2';Falha=$true}
+        )) {
+            if($FilterXPath -notmatch "EventID=$($caso.Id)(?: or|\))"){continue}
+            $xml = '<Event><EventData><Data Name="SubjectUserName">joao</Data><Data Name="SubjectDomainName">EMPRESA</Data><Data Name="SubjectUserSid">S-1-5-21-1001</Data><Data Name="SubjectLogonId">0x30</Data><Data Name="HandleId">0x10</Data><Data Name="ProcessId">0x20</Data><Data Name="ObjectType">File</Data><Data Name="ObjectName">E:\Dados\a.txt</Data><Data Name="ShareName">\\*\Dados</Data><Data Name="ShareLocalPath">\??\E:\Dados</Data><Data Name="RelativeTargetName">a.txt</Data><Data Name="AccessMask">'+$caso.Mask+'</Data></EventData></Event>'
+            $e=[pscustomobject]@{Id=$caso.Id;RecordId=$caso.Record;MachineName='SRV';TimeCreated=$inicio.AddSeconds($caso.Offset);Keywords=0x20000000000000;Xml=$xml}
+            if($caso.Falha){$e.Keywords=0x10000000000000}
+            $e | Add-Member ScriptMethod ToXml { $this.Xml }
+            $e
+        }
+    }
+    $temp=Join-Path ([IO.Path]::GetTempPath()) ('mistos-'+[guid]::NewGuid().ToString('N'))
+    $null=New-Item -ItemType Directory -Path $temp
+    try {
+        $csv=Join-Path $temp 'todos.csv'
+        $resumo=Join-Path $temp 'resumo.csv'
+        $r=@(& $relatorio -EventoId 5145,4663,4660,5140,5145 -Computador SRV -Inicio $inicio -Fim $inicio.AddMinutes(1) -CsvSaida $csv -CsvResumo $resumo -Agrupar -Silencioso -PassThru 3>$null 6>$null)
+        Assert-Resultado ($r.Count -eq 5) 'Todos os IDs selecionados entram no mesmo relatório sem duplicar seleções'
+        Assert-Resultado ((@($r.EventoId | Sort-Object -Unique) -join ',') -eq '4660,4663,5140,5145') 'Relatório combinado preserva o ID de cada evento'
+        Assert-Resultado (@($r | Where-Object RecordId -le 2).Count -eq 0) 'Folga de apoio não exporta 4663 anterior ao início'
+        Assert-Resultado (($r | Where-Object EventoId -eq 4660).Objeto -eq 'E:\Dados\a.txt') 'Exclusão mantém correlação em consulta mista'
+        Assert-Resultado (($r | Where-Object EventoId -eq 4663).Acao -eq 'Gravação ou criação') '4663 misto usa interpretação de objeto'
+        Assert-Resultado (($r | Where-Object RecordId -eq 5).Acao -eq 'Verificação SMB: Leitura ou listagem') '5145 misto usa interpretação SMB'
+        Assert-Resultado $global:TesteOrdemMista 'Consulta mista com exclusão exige ordem cronológica'
+        $exportado=@(Import-Csv -LiteralPath $csv -Delimiter ';')
+        Assert-Resultado ($exportado.Count -eq 5 -and (@($exportado.EventoId | Sort-Object -Unique).Count -eq 4)) 'CSV único contém todos os eventos selecionados'
+        $d=Import-Csv -LiteralPath ($csv+'.execucao.csv') -Delimiter ';'
+        Assert-Resultado ($d.EventosAlvoLidos -eq 5 -and $d.EventosApoioLidos -eq 2) 'Diagnóstico misto separa alvos e apoio'
+        $s=@(Import-Csv -LiteralPath $resumo -Delimiter ';')
+        Assert-Resultado (($s | Measure-Object Acessos -Sum).Sum -eq 5) 'Resumo contabiliza o conjunto selecionado'
+        $r=@(& $relatorio -EventoId 5145,4663,4660,5140 -Computador SRV -Inicio $inicio -Fim $inicio.AddMinutes(1) -Resultado Falha -Silencioso -PassThru 3>$null 6>$null)
+        Assert-Resultado ($r.Count -eq 1 -and $r[0].RecordId -eq 7) 'Resultado filtra eventos mistos sem remover apoio à correlação'
+        $r=@(& $relatorio -EventoId 5145,5140 -Computador SRV -Inicio $inicio -Fim $inicio.AddMinutes(1) -Silencioso -PassThru 3>$null 6>$null)
+        Assert-Resultado ($r.Count -eq 3 -and -not $global:TesteOrdemMista) 'Consulta sem exclusão contém apenas IDs selecionados e dispensa ordem crescente'
+        Assert-Resultado ($global:TesteFiltroMisto -notmatch 'EventID=4663|EventID=4656') 'Consulta sem exclusão dispensa eventos de apoio'
+    } finally { Remove-Item -LiteralPath $temp -Recurse -Force; Remove-Variable TesteFiltroMisto,TesteOrdemMista -Scope Global -ErrorAction SilentlyContinue }
+}
+
+# Lista de autorizados: falha parcial de AD não comprova ausência de associação.
+& {
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-AcessoPasta.ps1'))
+    $regrasAutorizacao=@(@{Pasta='Dados';Padrao='*Dados*';Grupo='GG_A'},@{Pasta='Dados';Padrao='*Dados*';Grupo='GG_B'})
+    $membrosPorGrupo=@{GG_A=(New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase))}
+    $registro=[pscustomobject]@{Usuario='EMPRESA\joao';Objeto='E:\Dados\a.txt';CaminhoLocal='E:\Dados\a.txt'}
+    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Indeterminado') 'Grupo não lido impede classificação negativa conclusiva'
+    $null=$membrosPorGrupo.GG_A.Add('JOAO')
+    Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Autorizado') 'Associação confirmada basta mesmo com outro grupo indisponível'
 }
 
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."

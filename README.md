@@ -25,7 +25,13 @@ Se o arquivo estiver bloqueado, veja [como liberar](docs/SOLUCAO-DE-PROBLEMAS.md
 | **4660** | Exclusões; consulta automaticamente os eventos de apoio para identificar o caminho |
 | **5140** | Conexões ao compartilhamento, sem detalhe de cada arquivo |
 
-Digite o ID ou a opção do menu: **1 = 5145**, **2 = 4663**, **3 = 5140**, **4 = 4660**.
+Na opção **2** do menu, informe um ou mais IDs ou opções separados por vírgula
+(ex.: `5145,4663,4660` ou `1,2,4`). **Enter** mantém a seleção.
+Todos os eventos selecionados entram no mesmo CSV, identificados pela coluna
+`EventoId`. O resumo soma os eventos selecionados; eventos diferentes da mesma
+operação podem representar mais de uma evidência, não operações únicas.
+
+Opções disponíveis: **1 = 5145**, **2 = 4663**, **3 = 5140**, **4 = 4660**.
 
 ## Executar por comando
 
@@ -47,6 +53,16 @@ Digite o ID ou a opção do menu: **1 = 5145**, **2 = 4663**, **3 = 5140**, **4 
 **Todas as pastas:** omita `-Pasta`. **Todos os usuários:** omita `-Usuario`. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas/minúsculas. Para outro servidor, acrescente `-Computador "SRV-ARQ1"`.
 
 Por padrão, contas terminadas em `$` e compartilhamentos administrativos são excluídos. Para incluí-los, use `-IncluirContasComputador` e `-IncluirCompartilhamentosEspeciais`.
+
+Para consultar vários eventos por comando:
+
+```powershell
+.\Relatorio-AcessoPasta.ps1 -EventoId 5145,4663,4660 -Dias 1 `
+    -CsvSaida "C:\Relatorios\eventos-{data}.csv"
+```
+
+A **opção 11** compara os acessos com um CSV `Pasta;Grupo` e exige
+ActiveDirectory/RSAT e acesso ao domínio. Veja [pré-requisitos e configuração](docs/LISTA-AUTORIZADOS.md).
 
 ## Arquivos gerados
 

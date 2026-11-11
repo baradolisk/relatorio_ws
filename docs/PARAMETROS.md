@@ -17,7 +17,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 | `Dias` | Dias anteriores, 1 a 3650; padrão 1. Não combinar com Inicio/Fim. |
 | `Inicio` | Início de janela específica; obrigatório quando se usa o conjunto de parâmetros de período. |
 | `Fim` | Fim da janela; com Inicio, padrão até o momento da execução. |
-| `EventoId` | Um dos valores 5145, 5140, 4663 ou 4660; padrão 5145. 4660 inclui eventos de suporte para correlacionar o caminho. |
+| `EventoId` | Um ou mais valores: `5145,5140,4663,4660`; padrão 5145. Todos entram no mesmo relatório, com `EventoId` por registro. 4660 inclui eventos de suporte para correlacionar o caminho. |
 | `Usuario` | Nome ou padrão com curingas; aceita DOMINIO\usuario; padrão `*`. |
 | `UsuarioExato` | Ativa filtro otimizado por nome exato no log, sensível à caixa, quando o nome permite. Não recebe texto. |
 | `Computador` | Um ou mais servidores: `"SRV1","SRV2"`; padrão computador local. |
@@ -29,7 +29,7 @@ Em uma hashtable de splatting: `Silencioso = $true`. O nome do usuário vai em
 | `ExcluirUsuarios` | Lista de padrões de usuários/contas a excluir. |
 | `IncluirCompartilhamentosEspeciais` | Inclui IPC$, ADMIN$, print$ e compartilhamentos de unidade como C$. |
 | `ListarCompartilhamentos` | Consulta inventário dos servidores informados; não descobre servidores do domínio. |
-| `ListaAutorizados` | CSV Pasta;Grupo; requer AD/RSAT. Comparação auxiliar por nome e trecho; não comprova autorização efetiva. |
+| `ListaAutorizados` | CSV Pasta;Grupo; requer AD/RSAT. Veja [configuração da opção 11](LISTA-AUTORIZADOS.md). Comparação auxiliar por nome e trecho; não comprova autorização efetiva. |
 | `EnriquecerAD` | Acrescenta departamento/cargo; requer AD/RSAT. |
 | `ResolverIP` | DNS reverso do IP; pode ser lento ou não refletir o nome real da estação. |
 | `CsvResumo` | CSV agregado por usuário e pasta; aceita `{data}`. |

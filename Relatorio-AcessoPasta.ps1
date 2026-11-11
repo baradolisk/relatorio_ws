@@ -31,7 +31,7 @@
     Data e hora final. Com Inicio, o padrão é até agora.
 
 .PARAMETER EventoId
-    Um evento por execução: 5145 (padrão), 5140, 4663 ou 4660 (exclusões).
+    Um ou mais eventos: 5145 (padrão), 5140, 4663 ou 4660 (exclusões). Ex.: -EventoId 5145,4663,4660.
 
 .PARAMETER Usuario
     Nome ou padrão do usuário. Exemplo: "joao*". Padrão: todos.
@@ -119,7 +119,8 @@ param (
     [datetime]$Fim,
 
     [ValidateSet(4663, 5145, 5140, 4660)]
-    [int]$EventoId = 5145,
+    [ValidateNotNullOrEmpty()]
+    [int[]]$EventoId = @(5145),
 
     [ValidateNotNullOrEmpty()]
     [string]$Usuario = '*',
@@ -510,7 +511,7 @@ function Get-StatusAutorizacao {
         }
     }
 
-    if ($lidos -eq 0) {
+    if ($lidos -lt $grupos.Count) {
         return 'Indeterminado'
     }
 
@@ -554,7 +555,7 @@ function Test-LogSeguranca {
                 "Aumente o tamanho do log (GPO) ou encaminhe/exporte os eventos."
             )
         }
-        elseif ($EventoId -ne 4663 -and $mb -lt 1024) {
+        elseif (@($EventoId | Where-Object { $_ -ne 4663 }).Count -gt 0 -and $mb -lt 1024) {
 
             Write-Host "  Dica: o evento $EventoId gera muito volume; considere aumentar o log de Segurança (hoje $mb MB)." -ForegroundColor DarkYellow
         }
@@ -567,29 +568,31 @@ function Test-LogSeguranca {
     if ($local) {
 
         # GUIDs das subcategorias (independem do idioma do Windows)
-        switch ($EventoId) {
-            4663 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
-            4660 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
-            5145 { $guid = '{0CCE9244-69AE-11D9-BED3-505054503030}' }
-            5140 { $guid = '{0CCE9224-69AE-11D9-BED3-505054503030}' }
-        }
-
-        try {
-
-            $linha = & auditpol.exe /get "/subcategory:$guid" /r 2>$null |
-                Where-Object { $_ -match '\{0CCE' } |
-                Select-Object -First 1
-
-            if ($linha) {
-
-                $config = ($linha -split ',')[4]
-
-                Write-Host "  Auditoria da subcategoria do evento ${EventoId}: $config" -ForegroundColor DarkGray
+        foreach ($idAuditoria in $EventoId) {
+            switch ($idAuditoria) {
+                4663 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
+                4660 { $guid = '{0CCE921D-69AE-11D9-BED3-505054503030}' }
+                5145 { $guid = '{0CCE9244-69AE-11D9-BED3-505054503030}' }
+                5140 { $guid = '{0CCE9224-69AE-11D9-BED3-505054503030}' }
             }
-        }
-        catch {
 
-            Write-Verbose "Não foi possível consultar o auditpol: $($_.Exception.Message)"
+            try {
+
+                $linha = & auditpol.exe /get "/subcategory:$guid" /r 2>$null |
+                    Where-Object { $_ -match '\{0CCE' } |
+                    Select-Object -First 1
+
+                if ($linha) {
+
+                    $config = ($linha -split ',')[4]
+
+                    Write-Host "  Auditoria da subcategoria do evento ${idAuditoria}: $config" -ForegroundColor DarkGray
+                }
+            }
+            catch {
+
+                Write-Verbose "Não foi possível consultar o auditpol: $($_.Exception.Message)"
+            }
         }
     }
 }
@@ -812,6 +815,8 @@ function Convert-EventoAcesso {
         [hashtable]$Correlacao
     )
 
+    # Cada registro é interpretado pelo próprio ID, inclusive em consultas mistas.
+    $EventoId = [int]$Evento.Id
     $script:totalLidos++
 
     try {
@@ -1302,10 +1307,12 @@ function Show-MenuRelatorioAcesso {
 
         $eventosMenu = @{'1'=5145; '2'=4663; '3'=5140; '5145'=5145; '4663'=4663; '5140'=5140; '4'=4660; '4660'=4660}
         while ($true) {
-            $r = (Read-Host "Digite a opção ou o ID do evento [$($cfg.EventoId)]; Enter mantém").Trim()
+            $r = (Read-Host "Digite opções ou IDs separados por vírgula (ex.: 1,2,4 ou 5145,4663,4660) [$($cfg.EventoId -join ',')]; Enter mantém").Trim()
             if ([string]::IsNullOrWhiteSpace($r)) { return }
-            if ($eventosMenu.ContainsKey($r)) {
-                $cfg.EventoId = $eventosMenu[$r]
+            $entradas = @($r -split '[,;\s]+')
+            $invalidos = @($entradas | Where-Object { -not $eventosMenu.ContainsKey($_) })
+            if ($invalidos.Count -eq 0) {
+                $cfg.EventoId = @($entradas | ForEach-Object { $eventosMenu[$_] } | Select-Object -Unique)
                 return
             }
             Write-Host 'Evento inválido. Use 5145, 4663, 5140 ou 4660 (ou as opções 1 a 4).' -ForegroundColor Yellow
@@ -1480,7 +1487,7 @@ function Show-MenuRelatorioAcesso {
         $p = [ordered]@{}
 
         $p.Computador = @($cfg.Computador)
-        $p.EventoId = [int]$cfg.EventoId
+        $p.EventoId = [int[]]@($cfg.EventoId)
         if ($cfg.MaxEventos -gt 0) { $p.MaxEventos = [int]$cfg.MaxEventos }
 
         if ($cfg.UsaPeriodo -and $null -ne $cfg.Inicio) {
@@ -1612,7 +1619,7 @@ function Show-MenuRelatorioAcesso {
         Write-Host ' RELATÓRIO DE AUDITORIA DE ACESSOS - MENU' -ForegroundColor Cyan
         Write-Host '============================================================' -ForegroundColor DarkGray
         Write-Host " 1) Servidor(es)          : $($cfg.Computador -join ', ')"
-        Write-Host " 2) Evento                : $($descEvento[[int]$cfg.EventoId])"
+        Write-Host " 2) Evento                : $((@($cfg.EventoId) | ForEach-Object { $descEvento[[int]$_] }) -join '; ')"
         Write-Host " 3) Período               : $textoPeriodo"
         Write-Host " 4) Pasta/compartilhamento: $textoPasta"
         Write-Host " 5) Usuário               : $textoUsuario"
@@ -1862,24 +1869,26 @@ if (-not [string]::IsNullOrWhiteSpace($ListaAutorizados)) {
 # O 4660 não traz o caminho: a abertura (4656/4663) pode ter ocorrido pouco antes
 # do início do período, então os eventos de apoio são lidos com 5 min de folga.
 $inicioConsulta = $dataInicio
-if ($EventoId -eq 4660) { $inicioConsulta = $dataInicio.AddMinutes(-5) }
+if ($EventoId -contains 4660) { $inicioConsulta = $dataInicio.AddMinutes(-5) }
 $clausulaTempo = "@SystemTime>='$(ConvertTo-XPathTime $inicioConsulta)'"
 
 if ($usaFim) {
     $clausulaTempo += " and @SystemTime<='$(ConvertTo-XPathTime $dataFim)'"
 }
 
-$condicoesSistema = "(EventID=$EventoId)"
-if ($EventoId -eq 4660) {
-    $condicoesSistema = '(EventID=4660 or EventID=4656 or EventID=4658 or EventID=4663 or EventID=4608 or EventID=4609 or EventID=1102)'
+$idsConsulta = @($EventoId | Select-Object -Unique)
+$condicoesSistema = '(' + (($idsConsulta | ForEach-Object { "EventID=$_" }) -join ' or ') + ')'
+if ($EventoId -contains 4660) {
+    $idsConsulta = @( (@($EventoId) + @(4656,4658,4663,4608,4609,1102)) | Select-Object -Unique)
+    $condicoesSistema = '(' + (($idsConsulta | ForEach-Object { "EventID=$_" }) -join ' or ') + ')'
 }
 
 # Palavras-chave de auditoria: Falha = 0x10000000000000, Êxito = 0x20000000000000
 # (mesma sintaxe band() das exibições personalizadas do Visualizador de Eventos)
-if ($EventoId -ne 4660 -and $Resultado -eq 'Falha') {
+if ($EventoId -notcontains 4660 -and $Resultado -eq 'Falha') {
     $condicoesSistema += ' and band(Keywords,4503599627370496)'
 }
-elseif ($EventoId -ne 4660 -and $Resultado -eq 'Exito') {
+elseif ($EventoId -notcontains 4660 -and $Resultado -eq 'Exito') {
     $condicoesSistema += ' and band(Keywords,9007199254740992)'
 }
 
@@ -1897,7 +1906,7 @@ if (
     $Usuario -notmatch '["'']'
 ) {
 
-    if ($EventoId -eq 4660) {
+    if ($EventoId -contains 4660) {
         # Manter reinício/limpeza mesmo sem SubjectUserName para invalidar handles.
         $xpath += " and (EventData[Data[@Name='SubjectUserName']='$Usuario'] or System[(EventID=4608 or EventID=4609 or EventID=1102)])"
     }
@@ -1929,7 +1938,7 @@ foreach ($servidor in $Computador) {
     $descartesCorrelacao = 0
     $exclusoesSemCaminho = 0
     $pastaLocalTraduzida = ''
-    if ($EventoId -in @(4663,4660) -and $Pasta -match '^\\\\([^\\]+)\\([^\\]+)(.*)$') {
+    if ((@($EventoId | Where-Object { $_ -in @(4663,4660) }).Count -gt 0) -and $Pasta -match '^\\\\([^\\]+)\\([^\\]+)(.*)$') {
         $hostFiltro = $Matches[1]; $nomeShare = $Matches[2]; $subcaminho = $Matches[3]
         if ($hostFiltro -ieq $servidor -or
             (($hostFiltro -notlike '*.*' -or $servidor -notlike '*.*') -and
@@ -1973,7 +1982,7 @@ foreach ($servidor in $Computador) {
     }
 
     # Servidor local: lê direto, sem RPC (-ComputerName só para remotos)
-    if ($EventoId -eq 4660) { Write-Host ("Apoio desde {0}; exclusões no relatório a partir de {1}." -f $inicioConsulta.ToString('dd/MM/yyyy HH:mm:ss'), $dataInicio.ToString('dd/MM/yyyy HH:mm:ss')) -ForegroundColor DarkGray }
+    if ($EventoId -contains 4660) { Write-Host ("Apoio desde {0}; exclusões no relatório a partir de {1}." -f $inicioConsulta.ToString('dd/MM/yyyy HH:mm:ss'), $dataInicio.ToString('dd/MM/yyyy HH:mm:ss')) -ForegroundColor DarkGray }
     $parametrosLog = @{
         LogName     = 'Security'
         FilterXPath = $xpath
@@ -1984,7 +1993,7 @@ foreach ($servidor in $Computador) {
         $parametrosLog.ComputerName = $servidor
     }
 
-    if ($EventoId -eq 4660) {
+    if ($EventoId -contains 4660) {
         $parametrosLog.Oldest = $true
         Write-Host 'Correlacionando exclusões em ordem cronológica; inclui eventos de suporte. Usa 4656 ou 4663 DELETE próximo; sem evidência, o caminho fica vazio.' -ForegroundColor DarkGray
     }
@@ -2013,7 +2022,7 @@ foreach ($servidor in $Computador) {
                 $consultadosServidor++
                 $idEventoAtual = [int]$eventoAtual.Id
                 $dataEventoAtual = $eventoAtual.TimeCreated
-                $alvoNoPeriodo = $idEventoAtual -eq $EventoId -and -not ($EventoId -eq 4660 -and $dataEventoAtual -lt $dataInicio)
+                $alvoNoPeriodo = $idEventoAtual -in $EventoId -and $dataEventoAtual -ge $dataInicio -and $dataEventoAtual -le $dataFim
                 if ($alvoNoPeriodo) { $eventosAlvoLidos++ }
                 else { $eventosApoioLidos++ }
                 if (($tempoConsulta.Elapsed.TotalSeconds - $ultimoProgresso) -ge 5) {
@@ -2023,27 +2032,26 @@ foreach ($servidor in $Computador) {
                     Write-Host $status -ForegroundColor DarkGray
                 }
                 try {
-                    if ($EventoId -eq 4660) {
+                    $registro = $null
+                    $correlacaoAtual = $null
+                    if ($EventoId -contains 4660) {
                         $correlacaoAtual = Update-CorrelacaoExclusao -Evento $eventoAtual
-                        $registro = $null
-                        if ($idEventoAtual -eq 4660) {
-                            if ($eventoAtual.TimeCreated -ge $dataInicio) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
-                            else {
-                                # Folga anterior ao período: serve só de apoio e não entra nas contagens do alvo.
-                                if (-not $correlacaoAtual.Caminho) { $exclusoesSemCaminho-- }
-                                $exclusoesAnterioresApoio++
-                                $idEventoAtual = 0
-                            }
+                        if ($idEventoAtual -eq 4660 -and $dataEventoAtual -lt $dataInicio) {
+                            if (-not $correlacaoAtual.Caminho) { $exclusoesSemCaminho-- }
+                            $exclusoesAnterioresApoio++
                         }
                     }
-                    else { $registro = Convert-EventoAcesso -Evento $eventoAtual }
+                    if ($alvoNoPeriodo) {
+                        if ($idEventoAtual -eq 4660) { $registro = Convert-EventoAcesso -Evento $eventoAtual -Correlacao $correlacaoAtual }
+                        else { $registro = Convert-EventoAcesso -Evento $eventoAtual }
+                    }
                 }
                 finally {
                     if ($eventoAtual -is [IDisposable]) { $eventoAtual.Dispose() }
                 }
 
                 if ($null -eq $registro) {
-                    if ($idEventoAtual -eq $EventoId) { $eventosAlvoDescartados++ }
+                    if ($alvoNoPeriodo) { $eventosAlvoDescartados++ }
                     return
                 }
 
@@ -2055,7 +2063,7 @@ foreach ($servidor in $Computador) {
                         $registro.LogonId,
                         $registro.IP,
                         $registro.Porta,
-                        ($registro.Objeto + '|' + $registro.RecordIdAbertura + '|' + $registro.RecordIdCorrelacao + '|' + $registro.HandleId),
+                        ([string]$registro.EventoId + '|' + $registro.Objeto + '|' + $registro.RecordIdAbertura + '|' + $registro.RecordIdCorrelacao + '|' + $registro.HandleId),
                         $registro.Acesso,
                         $registro.AccessMask,
                         $registro.ProcessId,
@@ -2128,6 +2136,7 @@ foreach ($servidor in $Computador) {
         $diagnosticoConsulta.Add([pscustomobject]@{
             Servidor = Protect-CsvCell $servidor; Estado = $estadoConsulta
             Inicio = $dataInicio.ToString('o'); Fim = $dataFim.ToString('o')
+            EventosSelecionados = $EventoId -join ','
             InicioConsulta = $inicioConsulta.ToString('o'); ExclusoesAnterioresComoApoio = $exclusoesAnterioresApoio
             EventosLidos = $consultadosServidor; Linhas = $registros.Count - $linhasAntes
             EventosAlvoLidos = $eventosAlvoLidos; EventosApoioLidos = $eventosApoioLidos
@@ -2394,7 +2403,7 @@ if (-not $Silencioso) {
     }
 
     # Compartilhamentos listados (-ListarCompartilhamentos) sem nenhum acesso
-    if ($ListarCompartilhamentos -and $listaShares.Count -gt 0 -and $EventoId -ne 4663) {
+    if ($ListarCompartilhamentos -and $listaShares.Count -gt 0 -and (@($EventoId | Where-Object { $_ -ne 4663 }).Count -gt 0)) {
 
         $semAcesso = @(
             foreach ($sh in $listaShares) {
@@ -2492,7 +2501,7 @@ if (-not $Silencioso) {
     Write-Host ' DETALHAMENTO' -ForegroundColor Cyan
     Write-Host '============================================================' -ForegroundColor DarkGray
 
-    $colunas = @('DataHora')
+    $colunas = @('DataHora', 'EventoId')
 
     if ($Computador.Count -gt 1) {
         $colunas += 'Servidor'

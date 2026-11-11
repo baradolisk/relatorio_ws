@@ -1,5 +1,12 @@
 # Alterações
 
+## Não publicado
+
+- Seleção de múltiplos eventos no menu e em `-EventoId`, com relatório e CSV combinados.
+- Preservação da correlação de exclusões, dos filtros e dos IDs no agrupamento.
+- Guia da opção 11 e classificação indeterminada quando a leitura de grupos é parcial.
+- Testes de consultas mistas e períodos explícitos para amostras com data fixa.
+
 ## Organização atual
 
 - Um único relatório: `Relatorio-AcessoPasta.ps1`, na raiz.
