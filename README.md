@@ -1,16 +1,27 @@
 # Relatório de acessos a arquivos
 
-Consulte acessos e exclusões no Windows Server e exporte os resultados para CSV.
+Veja quais eventos de acesso e exclusão o Windows registrou e salve o resultado
+em uma tabela que pode ser aberta no Excel. Você escolhe servidor, período,
+pasta e usuário pelo menu, sem precisar montar comandos com vários parâmetros.
+
+Se encontrar uma sigla desconhecida, consulte o [glossário](docs/GLOSSARIO.md).
+Para uma primeira consulta, siga o passo a passo abaixo.
 
 ## Começar pelo menu
 
 1. Baixe o [script](Relatorio-AcessoPasta.ps1) ou use **Code → Download ZIP**.
-2. Abra o PowerShell como administrador na pasta do arquivo.
-3. Confira a [auditoria necessária](docs/AUDITORIA-WINDOWS.md) e execute:
+2. Extraia o ZIP, se necessário, e localize `Relatorio-AcessoPasta.ps1`.
+3. Abra o PowerShell como administrador. Entre na pasta onde salvou o script;
+   por exemplo, use `cd C:\Scripts` se ele estiver nessa pasta.
+4. Confira a [auditoria necessária](docs/AUDITORIA-WINDOWS.md) e execute:
 
 ```powershell
 .\Relatorio-AcessoPasta.ps1 -Menu
 ```
+
+**O que deve aparecer:** uma tela com o título do relatório, a opção **L** para
+consultar os logs e opções numeradas para preparar a busca. Se aparecer um erro
+antes dessa tela, consulte [Resolver problemas](docs/SOLUCAO-DE-PROBLEMAS.md).
 
 O menu começa com o último dia, todas as pastas/usuários e CSVs em `C:\Relatorios`, na unidade do Windows. Altere o que precisar. **E** executa; **Q** sai; **Enter** mantém; **`-`** limpa um filtro ou desativa um CSV.
 
@@ -18,7 +29,7 @@ Se o arquivo estiver bloqueado, veja [como liberar](docs/SOLUCAO-DE-PROBLEMAS.md
 
 ## Detalhes dos logs
 
-Execute `./Relatorio-AcessoPasta.ps1 -Menu` e escolha **L — Detalhes dos logs**, no início do menu.
+Execute `.\Relatorio-AcessoPasta.ps1 -Menu` e escolha **L — Detalhes dos logs**, no início do menu.
 Informe o servidor (ou vários separados por vírgula) e o nome do log; `Security`
 é o padrão. A consulta mostra tamanho atual, limite, espaço restante, ocupação,
 quantidade de registros, primeiro/último evento, dias disponíveis, médias diárias
@@ -52,33 +63,19 @@ operação podem representar mais de uma evidência, não operações únicas.
 
 Opções disponíveis: **1 = 5145**, **2 = 4663**, **3 = 5140**, **4 = 4660**.
 
-## Executar por comando
+## Configurar a consulta pelo menu
 
-```powershell
-# Acessos à pasta RH no último dia
-.\Relatorio-AcessoPasta.ps1 -Pasta "RH" -Dias 1 -CsvSaida "C:\Relatorios\RH-{data}.csv"
+1. **1 — Servidor(es):** informe o servidor de arquivos; para vários, use `SRV1,SRV2`.
+2. **2 — Evento:** selecione um ou mais eventos separados por vírgula.
+3. **3 — Período:** escolha últimos dias ou informe início e fim.
+4. **4 — Pasta:** informe um trecho ou caminho; `-` consulta todas as pastas.
+5. **5 — Usuário:** informe o nome ou `*` para todos. Se ativar nome exato,
+   copie a grafia do log, incluindo maiúsculas e minúsculas.
+6. **9 e 10 — CSVs:** confira os destinos do detalhado e do resumo.
+7. Digite **E** e confirme a execução. Ao terminar, **Enter** volta ao menu.
 
-# Exclusões de um usuário na última hora
-.\Relatorio-AcessoPasta.ps1 `
-    -EventoId 4660 `
-    -Usuario "usuario.teste" `
-    -UsuarioExato `
-    -Inicio (Get-Date).AddHours(-1) `
-    -Fim (Get-Date) `
-    -CsvSaida "C:\Relatorios\exclusoes-{data}.csv" `
-    -Silencioso
-```
-
-**Todas as pastas:** omita `-Pasta`. **Todos os usuários:** omita `-Usuario`. UsuarioExato exige a mesma grafia do log, incluindo maiúsculas/minúsculas. Para outro servidor, acrescente `-Computador "SRV-ARQ1"`.
-
-Por padrão, contas terminadas em `$` e compartilhamentos administrativos são excluídos. Para incluí-los, use `-IncluirContasComputador` e `-IncluirCompartilhamentosEspeciais`.
-
-Para consultar vários eventos por comando:
-
-```powershell
-.\Relatorio-AcessoPasta.ps1 -EventoId 5145,4663,4660 -Dias 1 `
-    -CsvSaida "C:\Relatorios\eventos-{data}.csv"
-```
+Na opção **8**, você pode incluir contas de computador e compartilhamentos
+administrativos, desativados por padrão, e ajustar as demais opções.
 
 A **opção 11** compara os acessos com um CSV `Pasta;Grupo` e exige
 ActiveDirectory/RSAT e acesso ao domínio. Veja [pré-requisitos e configuração](docs/LISTA-AUTORIZADOS.md).
@@ -87,9 +84,9 @@ ActiveDirectory/RSAT e acesso ao domínio. Veja [pré-requisitos e configuraçã
 
 | Arquivo | Conteúdo |
 | --- | --- |
-| `-CsvSaida` | Detalhado: usuário, caminho, horário, ação e evidência |
-| `-CsvResumo` | Resumo por usuário e pasta |
-| `<CsvSaida>.execucao.csv` | Contagens, período efetivamente lido, limite e estado da consulta |
+| **9 — CSV detalhado** | Detalhado: usuário, caminho, horário, ação e evidência |
+| **10 — CSV resumo** | Resumo por usuário e pasta |
+| `<arquivo-detalhado>.execucao.csv` | Contagens, período efetivamente lido, limite e estado da consulta |
 
 `{data}` acrescenta data/hora ao nome. Os CSVs usam `;` como separador. Proteja a pasta de saída: contém dados de usuários e do ambiente.
 
@@ -101,12 +98,19 @@ ActiveDirectory/RSAT e acesso ao domínio. Veja [pré-requisitos e configuraçã
 - O modo 4660 lê cinco minutos anteriores para apoio, sem exportar exclusões anteriores ao período pedido. Isso pode aumentar a leitura.
 - O script consulta o log ativo, não arquivos `.evtx` arquivados. Auditoria não recupera eventos anteriores à habilitação.
 
+## Como continuar a leitura
+
+Para usar pela primeira vez, abra [Exemplos pelo menu](docs/EXEMPLOS.md).
+Para entender cada campo, consulte [Opções do menu](docs/PARAMETROS.md).
+Se o Windows ainda não grava os eventos, siga [Preparar auditoria](docs/AUDITORIA-WINDOWS.md).
+Quando uma palavra ou sigla não estiver clara, use o [Glossário](docs/GLOSSARIO.md).
+
 ## Guias
 
-[Exemplos](docs/EXEMPLOS.md) · [Parâmetros](docs/PARAMETROS.md) · [Configurar auditoria e logs](docs/AUDITORIA-WINDOWS.md) · [Resolver problemas](docs/SOLUCAO-DE-PROBLEMAS.md)
+[Exemplos](docs/EXEMPLOS.md) · [Opções do menu](docs/PARAMETROS.md) · [Configurar auditoria e logs](docs/AUDITORIA-WINDOWS.md) · [Resolver problemas](docs/SOLUCAO-DE-PROBLEMAS.md)
 
 Requisitos: Windows Server, PowerShell 5.1 ou posterior e acesso ao log de Segurança. ActiveDirectory/RSAT é opcional para consultas de grupos/cadastro; interface gráfica é opcional para GridView. O relatório apenas consulta dados: não muda auditoria nem permissões. Testes automatizados usam PowerShell 7 e fontes simuladas; valide a configuração no seu servidor.
 
-**Atualizando uma instalação antiga?** O único relatório agora é `Relatorio-AcessoPasta.ps1`, na raiz. Atualize os caminhos nos comandos e nas tarefas agendadas. Versões alternativas foram removidas; o histórico permanece nos commits do Git.
+**Atualizando uma instalação antiga?** O único relatório agora é `Relatorio-AcessoPasta.ps1`, na raiz. Use o arquivo da raiz para abrir o menu. Versões alternativas foram removidas; o histórico permanece nos commits do Git.
 
 [Alterações](CHANGELOG.md) · [Contribuir](CONTRIBUTING.md)
