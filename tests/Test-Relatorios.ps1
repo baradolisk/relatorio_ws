@@ -162,6 +162,20 @@ if ($PassThru) { [pscustomobject]@{TestePassThru="OK"} }
         Assert-Resultado (($capturaEvento.EventoId -join ',') -eq '4663') 'Após inválido, aceita correção e Enter preserva a seleção'
         Assert-Resultado (@($global:TesteRelatoriosMensagensMenu | Where-Object { $_ -like 'Evento inválido*' }).Count -eq 1) 'Evento inválido mostra aviso e repete a pergunta'
 
+        # A opção de logs é independente e retorna ao menu sem gerar relatório.
+        $global:TesteDetalhesLogChamadas = 0
+        function Get-DetalhesLog {
+            param($NomeLog,$Servidor)
+            $global:TesteDetalhesLogChamadas++
+            Assert-Resultado ($NomeLog -eq 'Security' -and $Servidor -eq 'SRV-LOG') 'Menu encaminha o nome do log e servidor informados'
+            [pscustomobject]@{Log=$NomeLog;Servidor=$Servidor;QuantidadeRegistros=10}
+        }
+        Remove-Item -LiteralPath $destino -ErrorAction SilentlyContinue
+        foreach ($r in @('l','SRV-LOG','','N','','Q')) { $global:TesteRelatoriosEntradasMenu.Enqueue($r) }
+        Show-MenuRelatorioAcesso -ScriptRelatorio $alvo
+        Assert-Resultado ($global:TesteDetalhesLogChamadas -eq 1 -and -not (Test-Path -LiteralPath $destino)) 'Detalhes dos logs não executa nem exporta relatório de acessos'
+        Remove-Variable TesteDetalhesLogChamadas -Scope Global
+
         # O uso antigo por parâmetros não deve abrir o menu.
         function Get-WinEvent {
             [CmdletBinding()]
@@ -549,6 +563,37 @@ try{
     Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Indeterminado') 'Grupo não lido impede classificação negativa conclusiva'
     $null=$membrosPorGrupo.GG_A.Add('JOAO')
     Assert-Resultado ((Get-StatusAutorizacao $registro) -eq 'Autorizado') 'Associação confirmada basta mesmo com outro grupo indisponível'
+}
+
+# Detalhes do log: tamanhos acima de Int32, log vazio/cheio e contagem diária.
+& {
+    Invoke-Expression (Import-FuncoesTeste (Join-Path $raiz 'Relatorio-AcessoPasta.ps1'))
+    function Get-WinEvent {
+        [CmdletBinding()]
+        param($ListLog,$LogName,$MaxEvents,[switch]$Oldest,$ComputerName)
+        if ($ListLog) { return $script:logSimulado }
+        if ($MaxEvents) {
+            $data = [datetime]::new(2026,11,11)
+            if ($Oldest) { $data=$data.AddDays(-4) }
+            return [pscustomobject]@{TimeCreated=$data}
+        }
+        foreach ($data in @('2026-11-09T12:00:00','2026-11-09T13:00:00','2026-11-10T12:00:00')) {
+            [pscustomobject]@{TimeCreated=[datetime]$data}
+        }
+    }
+    $script:logSimulado=[pscustomobject]@{LogName='Security';LogFilePath='C:\Security.evtx';FileSize=4GB;MaximumSizeInBytes=8GB;RecordCount=4000;LogMode='Circular'}
+    $d=Get-DetalhesLog -Servidor ([Environment]::MachineName)
+    Assert-Resultado ($d.EspacoRestanteMB -eq 4096 -and $d.OcupacaoPercentual -eq 50) 'Espaço acima de 2 GB usa cálculo sem overflow'
+    Assert-Resultado ($d.DiasDisponiveis -eq 4 -and $d.MediaRegistrosPorDia -eq 1000) 'Detalhes calculam intervalo e média diária'
+    Assert-Resultado ($d.EstimativaDiasTotaisNoLimite -eq 8 -and $d.EstimativaDiasAteEncher -eq 4) 'Estimativas de retenção e preenchimento'
+    $script:logSimulado.FileSize=8GB
+    $d=Get-DetalhesLog -Servidor ([Environment]::MachineName)
+    Assert-Resultado ($d.EspacoRestanteMB -eq 0 -and $d.EstimativaDiasAteEncher -eq 0) 'Log cheio não apresenta espaço negativo'
+    $script:logSimulado.RecordCount=0
+    $d=Get-DetalhesLog -Servidor ([Environment]::MachineName)
+    Assert-Resultado ($null -eq $d.RegistroMaisAntigo -and $null -eq $d.EstimativaDiasTotaisNoLimite) 'Log vazio não inventa datas ou estimativas'
+    $r=@(Get-RegistrosLogPorDia -Servidor ([Environment]::MachineName))
+    Assert-Resultado ($r.Count -eq 2 -and $r[0].Registros -eq 2 -and $r[1].Registros -eq 1) 'Contagem exata agrupa eventos por dia'
 }
 
 Write-Output "PASSOU: $script:verificacoes verificações de sintaxe e funções isoladas com dados simulados."

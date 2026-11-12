@@ -1118,6 +1118,79 @@ function Convert-EventoAcesso {
 
 
 # Menu opcional; executa este mesmo arquivo com os parâmetros escolhidos.
+# Consulta independente do relatório de acessos; não altera o log nem a auditoria.
+function Get-DetalhesLog {
+    [CmdletBinding()]
+    param (
+        [string]$NomeLog = 'Security',
+        [string]$Servidor = [Environment]::MachineName
+    )
+
+    $destino = @{}
+    if (-not (Test-ServidorLocal $Servidor)) { $destino.ComputerName = $Servidor }
+    $log = Get-WinEvent -ListLog $NomeLog @destino -ErrorAction Stop
+    $primeiro = $null; $ultimo = $null
+    $dias = $null; $mbPorDia = $null; $registrosPorDia = $null
+    $diasTotais = $null; $diasRestantes = $null
+    $tamanho = [double]$log.FileSize
+    $limite = [double]$log.MaximumSizeInBytes
+    $livre = [math]::Max([double]0, [double]($limite - $tamanho))
+
+    if ($log.RecordCount -gt 0) {
+        $primeiro = Get-WinEvent -LogName $NomeLog -Oldest -MaxEvents 1 @destino -ErrorAction Stop
+        $ultimo = Get-WinEvent -LogName $NomeLog -MaxEvents 1 @destino -ErrorAction Stop
+        $dias = ($ultimo.TimeCreated - $primeiro.TimeCreated).TotalDays
+        if ($dias -gt 0 -and $tamanho -gt 0 -and $limite -gt 0) {
+            $bytesPorDia = $tamanho / $dias
+            $mbPorDia = [math]::Round($bytesPorDia / 1MB, 2)
+            $registrosPorDia = [math]::Round([double]$log.RecordCount / $dias, 2)
+            $diasTotais = [math]::Round($limite / $bytesPorDia, 2)
+            $diasRestantes = [math]::Round($livre / $bytesPorDia, 2)
+        }
+    }
+
+    [pscustomobject]@{
+        Servidor = $Servidor
+        Log = $log.LogName
+        Arquivo = $log.LogFilePath
+        TamanhoAtualMB = [math]::Round($tamanho / 1MB, 2)
+        LimiteConfiguradoMB = [math]::Round($limite / 1MB, 2)
+        EspacoRestanteMB = [math]::Round($livre / 1MB, 2)
+        OcupacaoPercentual = $(if ($limite -gt 0) { [math]::Round(100 * $tamanho / $limite, 2) })
+        QuantidadeRegistros = $log.RecordCount
+        RegistroMaisAntigo = $primeiro.TimeCreated
+        RegistroMaisRecente = $ultimo.TimeCreated
+        DiasDisponiveis = $(if ($null -ne $dias) { [math]::Round($dias, 2) })
+        MediaEstimadaMBPorDia = $mbPorDia
+        MediaRegistrosPorDia = $registrosPorDia
+        EstimativaDiasTotaisNoLimite = $diasTotais
+        EstimativaDiasAteEncher = $diasRestantes
+        ModoRetencao = $log.LogMode
+    }
+}
+
+function Get-RegistrosLogPorDia {
+    [CmdletBinding()]
+    param (
+        [string]$NomeLog = 'Security',
+        [string]$Servidor = [Environment]::MachineName
+    )
+    $destino = @{}
+    if (-not (Test-ServidorLocal $Servidor)) { $destino.ComputerName = $Servidor }
+    $contagens = @{}
+    Get-WinEvent -LogName $NomeLog @destino -ErrorAction Stop | ForEach-Object {
+        try {
+            $dia = $_.TimeCreated.ToString('yyyy-MM-dd')
+            if (-not $contagens.ContainsKey($dia)) { $contagens[$dia] = 0L }
+            $contagens[$dia]++
+        }
+        finally { if ($_ -is [IDisposable]) { $_.Dispose() } }
+    }
+    foreach ($dia in ($contagens.Keys | Sort-Object)) {
+        [pscustomobject]@{Servidor=$Servidor; Log=$NomeLog; Dia=$dia; Registros=$contagens[$dia]}
+    }
+}
+
 function Show-MenuRelatorioAcesso {
     param ([string]$ScriptRelatorio, [hashtable]$ParametrosIniciais = @{})
     $ptBR = [System.Globalization.CultureInfo]::GetCultureInfo('pt-BR')
@@ -1459,6 +1532,37 @@ function Show-MenuRelatorioAcesso {
         $cfg[$Campo] = Read-Texto $Titulo $cfg[$Campo]
     }
 
+    function Show-DetalhesLogs {
+        Write-Host ''
+        Write-Host 'DETALHES DOS LOGS — consulta independente do relatório de acessos' -ForegroundColor Cyan
+        $servidores = ConvertTo-Lista (Read-Texto 'Servidor(es)' ($cfg.Computador -join ','))
+        if (@($servidores).Count -eq 0) { return }
+        $nomeLog = Read-Texto 'Nome do log (ex.: Security, System, Application)' 'Security'
+        if ([string]::IsNullOrWhiteSpace($nomeLog)) { return }
+        foreach ($hostLog in $servidores) {
+            try {
+                Get-DetalhesLog -NomeLog $nomeLog -Servidor $hostLog | Format-List | Out-Host
+            }
+            catch { Write-Warning "[$hostLog] Não foi possível consultar '$nomeLog': $($_.Exception.Message)" }
+        }
+        Write-Host 'Estimativas pressupõem volume constante; pré-alocação e limpeza podem distorcer os valores.' -ForegroundColor Yellow
+        Write-Host 'Dias disponíveis são o intervalo entre o primeiro e o último evento, sem garantir atividade em todos os dias.'
+        Write-Host 'Em log circular cheio, a gravação continua substituindo eventos antigos; dias disponíveis indicam a retenção atual.'
+        Write-Host 'Contagem exata por dia lê todo o log e pode demorar. O dia segue o horário retornado pelo PowerShell nesta máquina.'
+        do { $contar = (Read-Host 'Consultar também a quantidade exata de registros por dia? (S/N) [N]').Trim() }
+        while ($contar -notmatch '^(?:[sSnN])?$')
+        if ($contar -match '^[sS]$') {
+            foreach ($hostLog in $servidores) {
+                try {
+                    Get-RegistrosLogPorDia -NomeLog $nomeLog -Servidor $hostLog | Format-Table -AutoSize | Out-Host
+                }
+                catch { Write-Warning "[$hostLog] Contagem diária não concluída: $($_.Exception.Message)" }
+            }
+            Write-Host 'A contagem reflete os eventos ainda disponíveis durante a leitura; dias sem eventos não aparecem.'
+        }
+        Read-Host 'Pressione Enter para voltar ao menu' | Out-Null
+    }
+
     function Edit-ListaAutorizados {
 
         Write-Host ''
@@ -1618,6 +1722,8 @@ function Show-MenuRelatorioAcesso {
         Write-Host '============================================================' -ForegroundColor DarkGray
         Write-Host ' RELATÓRIO DE AUDITORIA DE ACESSOS - MENU' -ForegroundColor Cyan
         Write-Host '============================================================' -ForegroundColor DarkGray
+        Write-Host ' L) Detalhes dos logs     : tamanho, período, espaço e registros por dia'
+        Write-Host '------------------------------------------------------------' -ForegroundColor DarkGray
         Write-Host " 1) Servidor(es)          : $($cfg.Computador -join ', ')"
         Write-Host " 2) Evento                : $((@($cfg.EventoId) | ForEach-Object { $descEvento[[int]$_] }) -join '; ')"
         Write-Host " 3) Período               : $textoPeriodo"
@@ -1660,6 +1766,7 @@ function Show-MenuRelatorioAcesso {
             '10' { Edit-Csv -Campo 'CsvResumo' -Titulo 'CSV resumo' }
             '11' { Edit-ListaAutorizados }
             '12' { $cfg.MaxEventos = Read-Inteiro 'Limite por servidor (0 = sem limite)' $cfg.MaxEventos 0 2147483647 }
+            'L'  { Show-DetalhesLogs }
             'E'  { Invoke-Relatorio }
             'Q'  { return }
             default { }

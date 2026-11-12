@@ -16,6 +16,25 @@ O menu começa com o último dia, todas as pastas/usuários e CSVs em `C:\Relato
 
 Se o arquivo estiver bloqueado, veja [como liberar](docs/SOLUCAO-DE-PROBLEMAS.md#script-bloqueado).
 
+## Detalhes dos logs
+
+Execute `./Relatorio-AcessoPasta.ps1 -Menu` e escolha **L — Detalhes dos logs**, no início do menu.
+Informe o servidor (ou vários separados por vírgula) e o nome do log; `Security`
+é o padrão. A consulta mostra tamanho atual, limite, espaço restante, ocupação,
+quantidade de registros, primeiro/último evento, dias disponíveis, médias diárias
+e estimativas de dias totais e até encher. Campos sem dados suficientes ficam vazios.
+
+Para ver **registros por dia**, responda `S` à pergunta após o resumo. Essa
+contagem lê todo o log e pode demorar; usa as datas retornadas pelo PowerShell
+na máquina de execução e não lista dias sem eventos. A rotina volta ao menu,
+sem executar o relatório de acessos nem gerar seus CSVs.
+
+As estimativas pressupõem volume constante e podem ser distorcidas pela
+pré-alocação do arquivo. Em log circular cheio, novos eventos substituem os
+antigos. O intervalo disponível é uma referência de retenção, sem garantir
+atividade em todos os dias. Execute com acesso de leitura ao log; consultas
+remotas dependem também das permissões e das regras de firewall/RPC do Windows.
+
 ## Qual evento escolher?
 
 | Evento | Uso |
